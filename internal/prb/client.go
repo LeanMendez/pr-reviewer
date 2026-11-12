@@ -61,19 +61,17 @@ func parseError(ee *execx.ExitError) error {
 			Retryable      bool     `json:"retryable"`
 		} `json:"error"`
 	}
-	for _, line := range strings.Split(ee.Stderr, "\n") {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "{") {
+	// prb prints the envelope as indented JSON, possibly after other text:
+	// try decoding from each '{' until one yields an error code.
+	for i := 0; i < len(ee.Stderr); i++ {
+		if ee.Stderr[i] != '{' {
 			continue
 		}
-		if json.Unmarshal([]byte(line), &payload) == nil && payload.Error.Code != "" {
+		payload.Error.Code = ""
+		if json.NewDecoder(strings.NewReader(ee.Stderr[i:])).Decode(&payload) == nil && payload.Error.Code != "" {
 			e := payload.Error
 			return &Error{Code: e.Code, Message: e.Message, Retryable: e.Retryable, RequiredScopes: e.RequiredScopes}
 		}
-	}
-	if (json.Unmarshal([]byte(strings.TrimSpace(ee.Stderr)), &payload) == nil) && payload.Error.Code != "" {
-		e := payload.Error
-		return &Error{Code: e.Code, Message: e.Message, Retryable: e.Retryable, RequiredScopes: e.RequiredScopes}
 	}
 	msg := strings.TrimSpace(ee.Stderr)
 	if msg == "" {

@@ -87,13 +87,25 @@ func TestDiffExcludeArgs(t *testing.T) {
 }
 
 func TestErrorParsing(t *testing.T) {
-	_, _, err := fake("", fixture(t, "error_missing_scopes.json"), 1, nil).Context(context.Background(), "ws/stock", 42)
-	var pe *Error
-	if !errors.As(err, &pe) {
-		t.Fatalf("err = %v, want *Error", err)
+	indented := fixture(t, "error_missing_scopes.json")
+	oneline := fixture(t, "error_missing_scopes_oneline.json")
+	cases := map[string]string{
+		"indented":         indented,
+		"single line":      oneline,
+		"text before JSON": "warning: {retrying} request\n" + indented,
+		"text around JSON": "prb: failed\n" + indented + "hint: run prb auth login\n",
 	}
-	if pe.Code != "missing_scopes" || len(pe.RequiredScopes) == 0 || pe.Retryable {
-		t.Errorf("error = %+v", pe)
+	for name, stderr := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, _, err := fake("", stderr, 1, nil).Context(context.Background(), "ws/stock", 42)
+			var pe *Error
+			if !errors.As(err, &pe) {
+				t.Fatalf("err = %v, want *Error", err)
+			}
+			if pe.Code != "missing_scopes" || len(pe.RequiredScopes) != 1 || pe.Retryable {
+				t.Errorf("error = %+v", pe)
+			}
+		})
 	}
 }
 
