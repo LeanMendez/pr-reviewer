@@ -21,7 +21,7 @@ cada una con su archivo.
 2. Cambios sensibles sin justificar (Grupo A de la política). Si el PR cambia
    configuración, CI, Docker, dependencias, lockfiles, migraciones o permisos y
    la descripción no lo explica, es un hallazgo `medio`. Los archivos sensibles
-   vienen marcados en los chequeos sin IA del bloque de datos.
+   vienen marcados en los chequeos sin IA del bloque datos_herramienta.
 3. Detalles menores (Grupo B de la política): código comentado, logs de debug,
    TODOs sin ticket, nombres confusos y, solo si se cumple alguno de sus
    umbrales, sobreingeniería. Van con `grupo` B y severidad `bajo`. Para la
@@ -35,6 +35,7 @@ contratos (`tests`), salvo que una regla escrita lo pida.
 
 - Mirá solo las líneas que agrega o cambia el PR. Si el archivo ya violaba la
   regla en código que el PR no toca, es preexistente.
-- Si una norma del repo y la política se contradicen, gana la norma del repo.
+- Si una norma del repo y la política se contradicen, en cómo se escribe el
+  código gana la norma del repo; la política decide qué vale la pena reportar.
 - Antes de decir que algo no sigue la convención, buscá con Grep cómo lo hace
   el resto del repo.

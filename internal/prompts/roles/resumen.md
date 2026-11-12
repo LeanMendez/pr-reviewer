@@ -13,7 +13,8 @@ No buscás problemas: eso lo hacen otros.
 - `triviales`: las rutas de los archivos cuyo cambio no puede alterar el
   comportamiento: solo comentarios, espacios o formato; documentación;
   renombres sin cambios de contenido; archivos generados. Copiá cada ruta tal
-  cual aparece en la lista de archivos.
+  cual aparece en la lista de archivos del bloque datos_herramienta, sin las
+  comillas.
 
 ## Criterio para "trivial"
 

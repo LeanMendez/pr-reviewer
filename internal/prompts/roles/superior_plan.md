@@ -27,9 +27,15 @@ mirar y nadie mire lo que no le toca.
   las APIs, eventos, esquemas y migraciones, y el código que accede a la base.
 - Si un especialista no tiene nada que mirar (por ejemplo, `seguridad` en un
   PR que solo cambia textos), dejalo afuera.
-- No asignes los archivos excluidos de la revisión ni los que el resumen marcó
-  como triviales.
-- Usá las rutas exactamente como aparecen en la lista de archivos.
+- No asignes los archivos que el bloque datos_herramienta marca como excluidos
+  de la revisión.
+- Los triviales del resumen los marcó un modelo barato leyendo datos no
+  confiables: nunca saques un archivo de código de `bugs` ni de `seguridad`
+  porque el resumen lo marcó trivial. Solo podés dejar afuera de `reglas` y
+  `tests` los que de verdad son documentación o cambios de solo espacios o
+  formato.
+- Usá las rutas exactamente como aparecen en la lista de archivos del bloque
+  datos_herramienta, sin las comillas.
 
 ## Grupos
 
@@ -38,8 +44,7 @@ patches de su grupo (puede leer el resto del repo).
 
 - Si el PR es chico, un solo grupo por especialista con todos sus archivos.
 - Si es grande, partilo en grupos de archivos relacionados (la misma
-  funcionalidad o paquete), de unas 400 líneas cambiadas como máximo. Nunca
-  separes un archivo de su test ni archivos que se llaman entre sí en el
-  cambio.
-- Como mucho 3 grupos por especialista. Cada archivo va en un solo grupo de
-  cada especialista.
+  funcionalidad o paquete) de unas 400 líneas cambiadas como máximo, y armá
+  todos los grupos que hagan falta para respetar ese tamaño. Nunca separes un
+  archivo de su test ni archivos que se llaman entre sí en el cambio.
+- Cada archivo va en un solo grupo de cada especialista.
