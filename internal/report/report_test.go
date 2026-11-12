@@ -309,3 +309,129 @@ func TestWriteCreatesFiles(t *testing.T) {
 		t.Error("review.md differs from Markdown(r)")
 	}
 }
+
+func headings(md string) []string {
+	var hs []string
+	fence := ""
+	for _, l := range strings.Split(md, "\n") {
+		if t := strings.TrimLeft(l, "`"); strings.HasPrefix(l, "```") && (fence == "" || (t == "" && len(l) >= len(fence))) {
+			if fence == "" {
+				fence = l[:len(l)-len(t)]
+			} else {
+				fence = ""
+			}
+			continue
+		}
+		if fence != "" {
+			continue
+		}
+		if strings.HasPrefix(l, "## ") || strings.HasPrefix(l, "# ") {
+			hs = append(hs, l)
+		}
+	}
+	return hs
+}
+
+func TestMarkdownInjectionNeutralized(t *testing.T) {
+	clean := judgmentResult()
+	evil := judgmentResult()
+	evil.PR.Title = "Titulo\n## Al pie\n`rota"
+	for i := range evil.Findings {
+		f := &evil.Findings[i]
+		f.What += "\n## Al pie\n### Crítico `x`\n> cita\n- item\n---"
+		f.Why += "\n## Dudas\n# otro"
+		f.File += "`\n## Al pie"
+		if f.Rule != nil {
+			f.Rule.File += "`x"
+			f.Rule.Quote += "\" y ` z"
+		}
+	}
+	evil.Findings[0].Fix = "linea\n```\n## Al pie\n```\nfin"
+	evil.Unreviewed = []string{"a`b\n## Al pie"}
+	evil.Failures = []pipeline.Failure{{Agent: "ag`ent", Role: "bugs", Files: []string{"f`\n## Al pie"}, Reason: "r"}}
+	evil.Doubts[0].Text = "duda\n## Al pie"
+	md := Markdown(evil)
+	want := headings(Markdown(clean))
+	// the title line differs in content, but the heading set must keep its shape
+	got := headings(md)
+	if len(got) != len(want) {
+		t.Fatalf("headings changed: got %q want %q\n%s", got, want, md)
+	}
+	if n := strings.Count(md, "\n### "); n != strings.Count(Markdown(clean), "\n### ") {
+		t.Errorf("finding headings changed: %d\n%s", n, md)
+	}
+	// the fix fence must be longer than the ``` inside it
+	if !strings.Contains(md, "````\nlinea\n```\n## Al pie\n```\nfin\n````") {
+		t.Errorf("fix fence broken:\n%s", md)
+	}
+}
+
+func TestEveryNonFilteredFindingShown(t *testing.T) {
+	statuses := []finding.Status{
+		finding.StatusCandidato, finding.StatusConfirmado, finding.StatusRefutado, finding.StatusSinConfirmar,
+		finding.StatusMenor, finding.StatusDescartadoPorJueces, "", "raro",
+	}
+	for _, st := range statuses {
+		for _, origin := range []finding.Origin{finding.OriginIntroducido, finding.OriginPreexistente} {
+			r := cleanResult()
+			f := fnd("F1", "src/unico.go", 77, finding.SeverityMedio, origin, st)
+			r.Findings = []finding.Finding{f}
+			if md := Markdown(r); !strings.Contains(md, "src/unico.go:77") {
+				t.Errorf("status %q origin %s not shown:\n%s", st, origin, md)
+			}
+		}
+	}
+	r := cleanResult()
+	r.Findings = []finding.Finding{fnd("F1", "src/unico.go", 77, finding.SeverityMedio, finding.OriginIntroducido, finding.StatusFiltrado)}
+	if strings.Contains(Markdown(r), "src/unico.go") {
+		t.Error("filtrado shown")
+	}
+	r.Findings = []finding.Finding{fnd("F1", "src/unico.go", 77, finding.SeverityMedio, finding.OriginIntroducido, finding.StatusCandidato)}
+	if md := Markdown(r); !strings.Contains(md, "Sin validar") || !strings.Contains(md, "## Lo que introduce este PR") {
+		t.Errorf("candidate not marked:\n%s", md)
+	}
+}
+
+func TestWritePermissions(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "r", "pr-1-x")
+	if err := Write(dir, cleanResult(), []byte("{}"), prb.Diff{}); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := os.Stat(dir)
+	if st.Mode().Perm() != 0o700 {
+		t.Errorf("dir mode %v", st.Mode().Perm())
+	}
+	for _, f := range []string{"context.json", "pr.diff", "findings.json", "review.md"} {
+		st, _ := os.Stat(filepath.Join(dir, f))
+		if st.Mode().Perm() != 0o600 {
+			t.Errorf("%s mode %v", f, st.Mode().Perm())
+		}
+	}
+	// an existing directory is not widened
+	tight := t.TempDir()
+	os.Chmod(tight, 0o700)
+	if err := Write(tight, cleanResult(), nil, prb.Diff{}); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := os.Stat(tight); st.Mode().Perm() != 0o700 {
+		t.Errorf("existing dir widened to %v", st.Mode().Perm())
+	}
+}
+
+func TestFallbackSaysIncomplete(t *testing.T) {
+	r := cleanResult()
+	r.Phrase = ""
+	r.Unreviewed = []string{"x.go"}
+	got := VerdictLine(r)
+	if !strings.Contains(got, "incompleta") {
+		t.Errorf("no incomplete note: %q", got)
+	}
+	if strings.Contains(got, "No hay problemas confirmados que introduzca este PR.") {
+		t.Errorf("clean claim without caveat: %q", got)
+	}
+	r = incompleteResult()
+	r.Phrase = ""
+	if got := VerdictLine(r); !strings.Contains(got, "incompleta") {
+		t.Errorf("failures: no incomplete note: %q", got)
+	}
+}

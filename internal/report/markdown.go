@@ -47,7 +47,11 @@ func split(fs []finding.Finding) sections {
 		switch f.Status {
 		case finding.StatusRefutado, finding.StatusDescartadoPorJueces:
 			s.discarded = append(s.discarded, f)
-		case finding.StatusConfirmado, finding.StatusSinConfirmar, finding.StatusMenor:
+		case finding.StatusFiltrado:
+			// only in findings.json
+		default:
+			// confirmado, sin_confirmar, menor, and anything unvalidated
+			// (candidato, unknown): never dropped silently.
 			switch {
 			case f.Origin == finding.OriginPreexistente:
 				s.preexisting = append(s.preexisting, f)
@@ -60,7 +64,7 @@ func split(fs []finding.Finding) sections {
 	}
 	bySeverity := func(a, b finding.Finding) int {
 		return cmp.Or(
-			cmp.Compare(severityOrder[a.Severity], severityOrder[b.Severity]),
+			cmp.Compare(sevRank(a.Severity), sevRank(b.Severity)),
 			cmp.Compare(a.File, b.File),
 			cmp.Compare(a.Line, b.Line),
 		)
@@ -84,11 +88,11 @@ func VerdictLine(r pipeline.Result) string {
 	if r.IncompleteWarning {
 		b.WriteString(" Revisión incompleta.")
 	}
-	phrase := strings.TrimSpace(r.Phrase)
+	phrase := oneLine(r.Phrase)
 	if phrase == "" {
 		phrase = fallbackPhrase(r)
 	}
-	b.WriteString(" " + phrase)
+	b.WriteString(" " + inline(phrase))
 	return b.String()
 }
 
@@ -101,6 +105,7 @@ func fallbackPhrase(r pipeline.Result) string {
 			counts[f.Severity]++
 		}
 	}
+	incomplete := len(r.Failures) > 0 || len(r.FailedAgents) > 0 || len(r.Unreviewed) > 0
 	var lead string
 	switch n := counts[finding.SeverityCritico]; {
 	case n == 1:
@@ -118,7 +123,14 @@ func fallbackPhrase(r pipeline.Result) string {
 			lead = fmt.Sprintf("%d problemas menores que introduce este PR.", n)
 		} else {
 			lead = "No hay problemas confirmados que introduzca este PR."
+			if incomplete {
+				lead = "No hay problemas confirmados, pero la revisión quedó incompleta."
+				incomplete = false
+			}
 		}
+	}
+	if incomplete {
+		lead += " La revisión quedó incompleta."
 	}
 	return lead + " La síntesis no está disponible; revisá los hallazgos abajo."
 }
@@ -128,9 +140,9 @@ func Markdown(r pipeline.Result) string {
 	s := split(r.Findings)
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "# #%d %s\n\n", r.PR.ID, r.PR.Title)
+	fmt.Fprintf(&b, "# #%d %s\n\n", r.PR.ID, inline(oneLine(r.PR.Title)))
 	if r.PR.URL != "" {
-		fmt.Fprintf(&b, "%s\n\n", r.PR.URL)
+		fmt.Fprintf(&b, "%s\n\n", oneLine(r.PR.URL))
 	}
 	b.WriteString(VerdictLine(r) + "\n")
 
@@ -143,26 +155,26 @@ func Markdown(r pipeline.Result) string {
 	if len(s.minor) > 0 {
 		b.WriteString("\n## Detalles menores y preguntas de diseño\n\n")
 		for _, f := range s.minor {
-			fmt.Fprintf(&b, "- `%s` %s\n", loc(f), oneLine(f.What))
+			fmt.Fprintf(&b, "- %s %s\n", code(loc(f)), inline(oneLine(f.What)))
 		}
 	}
 	if len(s.preexisting) > 0 {
 		b.WriteString("\n## Ya existía antes de este PR\n\n")
 		b.WriteString("El PR toca código que ya tenía estos problemas. Sirven de contexto y no cuentan para el veredicto.\n\n")
 		for _, f := range s.preexisting {
-			fmt.Fprintf(&b, "- `%s` %s\n", loc(f), oneLine(f.What))
+			fmt.Fprintf(&b, "- %s %s\n", code(loc(f)), inline(oneLine(f.What)))
 		}
 	}
 	if len(r.Doubts) > 0 {
 		b.WriteString("\n## Dudas\n\n")
 		for _, d := range r.Doubts {
-			fmt.Fprintf(&b, "- `%s` %s\n", fileLine(d.File, d.Line), oneLine(d.Text))
+			fmt.Fprintf(&b, "- %s %s\n", code(fileLine(d.File, d.Line)), inline(oneLine(d.Text)))
 		}
 	}
 	if len(r.Split) > 0 {
 		b.WriteString("\n## Cómo partir este PR\n\n")
 		for i, p := range r.Split {
-			fmt.Fprintf(&b, "%d. %s (%s, %d líneas)", i+1, p.Title, strings.Join(p.Files, ", "), p.Lines)
+			fmt.Fprintf(&b, "%d. %s (%s, %d líneas)", i+1, inline(oneLine(p.Title)), inline(oneLine(strings.Join(p.Files, ", "))), p.Lines)
 			if p.DependsOn > 0 {
 				fmt.Fprintf(&b, ": depende de la %d, se mergea después", p.DependsOn)
 			}
@@ -174,15 +186,20 @@ func Markdown(r pipeline.Result) string {
 }
 
 func writeFinding(b *strings.Builder, f finding.Finding) {
-	fmt.Fprintf(b, "\n### %s `%s`", severityNames[f.Severity], loc(f))
+	fmt.Fprintf(b, "\n### %s %s", sevName(f.Severity), code(loc(f)))
 	switch {
+	case f.Status != finding.StatusConfirmado && f.Status != finding.StatusSinConfirmar:
+		b.WriteString(" · **Sin validar**")
 	case f.Status == finding.StatusSinConfirmar:
 		b.WriteString(" · **Sin confirmar**")
 	case f.Origin == finding.OriginIncierto:
 		b.WriteString(" · **Origen incierto**")
 	}
 	b.WriteString("\n\n")
-	b.WriteString(strings.TrimSpace(f.What) + "\n")
+	b.WriteString(prose(f.What) + "\n")
+	if f.Status != finding.StatusConfirmado && f.Status != finding.StatusSinConfirmar {
+		b.WriteString("\nNo pasó por la validación: tomalo como una sospecha y revisalo vos.\n")
+	}
 	if f.Status == finding.StatusSinConfirmar {
 		b.WriteString("\nNo se pudo validar: tomalo como una sospecha y revisalo vos.\n")
 	}
@@ -190,20 +207,21 @@ func writeFinding(b *strings.Builder, f finding.Finding) {
 		b.WriteString("\nNo está claro si el PR lo introdujo o ya estaba.\n")
 	}
 	if strings.TrimSpace(f.Why) != "" {
-		fmt.Fprintf(b, "\nPor qué pasa: %s\n", strings.TrimSpace(f.Why))
+		fmt.Fprintf(b, "\nPor qué pasa: %s\n", prose(f.Why))
 	}
 	if strings.TrimSpace(f.Fix) != "" {
 		b.WriteString("\n")
 		if f.Rule != nil {
-			fmt.Fprintf(b, "Solución, según `%s` (\"%s\"):", f.Rule.File, f.Rule.Quote)
+			fmt.Fprintf(b, "Solución, según %s (\"%s\"):", code(f.Rule.File), inline(oneLine(f.Rule.Quote)))
 		} else {
 			b.WriteString("Solución:")
 		}
 		fix := strings.TrimSpace(f.Fix)
 		if strings.Contains(fix, "\n") {
-			fmt.Fprintf(b, "\n\n```\n%s\n```\n", fix)
+			fence := strings.Repeat("`", max(3, longestRun(fix, '`')+1))
+			fmt.Fprintf(b, "\n\n%s\n%s\n%s\n", fence, fix, fence)
 		} else {
-			fmt.Fprintf(b, " %s\n", fix)
+			fmt.Fprintf(b, " %s\n", inline(fix))
 		}
 	}
 	if f.FixStatus == finding.FixStatusARevisar {
@@ -227,7 +245,7 @@ func judges(votes []finding.JudgeVote) string {
 		default:
 			say = "lo confirma"
 		}
-		parts = append(parts, fmt.Sprintf("%s %s", v.Judge, say))
+		parts = append(parts, fmt.Sprintf("%s %s", inline(oneLine(v.Judge)), say))
 	}
 	return strings.Join(parts, "; ") + "."
 }
@@ -237,21 +255,21 @@ func writeFooter(b *strings.Builder, r pipeline.Result, s sections) {
 	if len(s.discarded) > 0 {
 		fmt.Fprintf(b, "\nDescartados: %d.\n\n", len(s.discarded))
 		for _, f := range s.discarded {
-			reason := oneLine(f.Reason)
+			reason := inline(oneLine(f.Reason))
 			if reason == "" {
 				reason = "sin motivo registrado"
 			}
-			fmt.Fprintf(b, "- `%s` %s Motivo: %s\n", loc(f), oneLine(f.What), reason)
+			fmt.Fprintf(b, "- %s %s Motivo: %s\n", code(loc(f)), inline(oneLine(f.What)), reason)
 		}
 	}
 	if len(r.Unreviewed) > 0 {
 		b.WriteString("\nSin revisar:\n\n")
 		for _, p := range r.Unreviewed {
-			fmt.Fprintf(b, "- %s\n", p)
+			fmt.Fprintf(b, "- %s\n", inline(oneLine(p)))
 		}
 	}
 	if len(r.Excluded) > 0 {
-		fmt.Fprintf(b, "\nExcluidos de la revisión (generados): %s.\n", strings.Join(r.Excluded, ", "))
+		fmt.Fprintf(b, "\nExcluidos de la revisión (generados): %s.\n", inline(oneLine(strings.Join(r.Excluded, ", "))))
 	}
 	if lines := failureLines(r); len(lines) > 0 {
 		b.WriteString("\nAgentes que fallaron (lo que cubrían no se revisó del todo):\n\n")
@@ -265,7 +283,7 @@ func writeFooter(b *strings.Builder, r pipeline.Result, s sections) {
 	} else {
 		paths := make([]string, len(r.RuleFiles))
 		for i, f := range r.RuleFiles {
-			paths[i] = f.Path
+			paths[i] = inline(oneLine(f.Path))
 		}
 		fmt.Fprintf(b, "Reglas usadas: %s.\n", strings.Join(paths, ", "))
 	}
@@ -279,25 +297,25 @@ func failureLines(r pipeline.Result) []string {
 	seen := map[string]bool{}
 	for _, f := range r.Failures {
 		seen[f.Agent] = true
-		l := fmt.Sprintf("`%s` (rol %s)", f.Agent, f.Role)
+		l := fmt.Sprintf("%s (rol %s)", code(f.Agent), inline(oneLine(f.Role)))
 		var covered string
 		switch {
 		case len(f.Files) > 0:
-			covered = strings.Join(f.Files, ", ")
+			covered = inline(oneLine(strings.Join(f.Files, ", ")))
 		case f.Candidate != "":
-			covered = "candidato " + f.Candidate
+			covered = "candidato " + inline(oneLine(f.Candidate))
 		}
 		if covered != "" {
 			l += ": " + covered
 		}
 		if reason := truncate(firstLine(f.Reason), maxReasonRunes); reason != "" {
-			l += ". Motivo: " + reason
+			l += ". Motivo: " + inline(reason)
 		}
 		lines = append(lines, l)
 	}
 	for _, name := range r.FailedAgents {
 		if !seen[name] {
-			lines = append(lines, fmt.Sprintf("`%s`", name))
+			lines = append(lines, code(name))
 		}
 	}
 	return lines
@@ -317,6 +335,7 @@ func duration(r pipeline.Result) string {
 func loc(f finding.Finding) string { return fileLine(f.File, f.Line) }
 
 func fileLine(file string, line int) string {
+	file = oneLine(file)
 	if line > 0 {
 		return fmt.Sprintf("%s:%d", file, line)
 	}
@@ -326,6 +345,70 @@ func fileLine(file string, line int) string {
 func firstLine(s string) string {
 	line, _, _ := strings.Cut(strings.TrimSpace(s), "\n")
 	return strings.TrimSpace(line)
+}
+
+func sevRank(s finding.Severity) int {
+	if n, ok := severityOrder[s]; ok {
+		return n
+	}
+	return len(severityOrder)
+}
+
+func sevName(s finding.Severity) string {
+	if n, ok := severityNames[s]; ok {
+		return n
+	}
+	return inline(oneLine(string(s)))
+}
+
+// code renders s as one inline code span whose delimiter is longer than any
+// backtick run inside it, so it cannot be closed early.
+func code(s string) string {
+	s = oneLine(s)
+	d := strings.Repeat("`", longestRun(s, '`')+1)
+	if strings.HasPrefix(s, "`") || strings.HasSuffix(s, "`") {
+		s = " " + s + " "
+	}
+	return d + s + d
+}
+
+// inline escapes the backticks of single-line text so they open no span.
+func inline(s string) string { return strings.ReplaceAll(s, "`", "\\`") }
+
+// prose cleans free multi-line text: each line loses its indentation, has its
+// backticks escaped and, when it would start a heading, quote, list, rule or
+// fence, a backslash in front, so it stays a plain paragraph line.
+func prose(s string) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	for i, l := range lines {
+		l = inline(strings.TrimSpace(l))
+		if l != "" && (strings.ContainsRune("#>-*+=~|_", rune(l[0])) || startsOrdered(l)) {
+			l = "\\" + l
+		}
+		lines[i] = l
+	}
+	return strings.Join(lines, "\n")
+}
+
+func startsOrdered(l string) bool {
+	i := 0
+	for i < len(l) && l[i] >= '0' && l[i] <= '9' {
+		i++
+	}
+	return i > 0 && i < len(l) && (l[i] == '.' || l[i] == ')')
+}
+
+func longestRun(s string, c byte) int {
+	best, cur := 0, 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == c {
+			cur++
+			best = max(best, cur)
+		} else {
+			cur = 0
+		}
+	}
+	return best
 }
 
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }

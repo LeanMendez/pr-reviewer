@@ -40,7 +40,7 @@ func ReportsRoot(exec execx.Exec) string {
 
 // Write saves the four files of a review into dir, creating it.
 func Write(dir string, r pipeline.Result, rawContext []byte, d prb.Diff) error {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("crear %s: %w", dir, err)
 	}
 	findings, err := json.MarshalIndent(r, "", "  ")
@@ -57,7 +57,7 @@ func Write(dir string, r pipeline.Result, rawContext []byte, d prb.Diff) error {
 		{"review.md", []byte(Markdown(r))},
 	}
 	for _, f := range files {
-		if err := os.WriteFile(filepath.Join(dir, f.name), f.data, 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, f.name), f.data, 0o600); err != nil {
 			return fmt.Errorf("escribir %s: %w", f.name, err)
 		}
 	}
