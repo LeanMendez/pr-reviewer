@@ -1,0 +1,4 @@
+[
+  {"full_name": "ws/stock", "slug": "stock", "name": "Stock", "private": true, "main_branch": "main", "updated_on": "2026-11-11T10:00:00Z", "url": "https://bitbucket.org/ws/stock"},
+  {"full_name": "ws/pagos", "slug": "pagos", "name": "Pagos", "private": true, "main_branch": "main", "updated_on": "2026-11-09T10:00:00Z", "url": "https://bitbucket.org/ws/pagos"}
+]
