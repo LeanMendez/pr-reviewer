@@ -36,7 +36,16 @@ func (c Cache) Prepare(ctx context.Context, workspace, repo string, pr prb.PR) (
 		return Worktrees{}, nil, ErrForkUnsupported
 	}
 
-	repoDir := filepath.Join(c.Root, workspace, repo)
+	for _, name := range []string{workspace, repo} {
+		if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
+			return Worktrees{}, nil, fmt.Errorf("nombre inválido %q: no puede estar vacío ni contener separadores ni '..'", name)
+		}
+	}
+	base0 := filepath.Join(c.Root, workspace, repo)
+	repoDir := filepath.Join(base0, "clone")
+	if err := c.contained(repoDir); err != nil {
+		return Worktrees{}, nil, err
+	}
 	if _, err := os.Stat(filepath.Join(repoDir, ".git")); err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			return Worktrees{}, nil, err
@@ -62,7 +71,10 @@ func (c Cache) Prepare(ctx context.Context, workspace, repo string, pr prb.PR) (
 		return Worktrees{}, nil, fmt.Errorf("resolviendo commit destino %q: %w", pr.Destination.Commit, err)
 	}
 
-	dir := filepath.Join(repoDir, "worktrees", fmt.Sprintf("pr%d-%s", pr.ID, pr.Source.Commit))
+	dir := filepath.Join(base0, "worktrees", fmt.Sprintf("pr%d-%s", pr.ID, head[:min(12, len(head))]))
+	if err := c.contained(dir); err != nil {
+		return Worktrees{}, nil, err
+	}
 	wt := Worktrees{Head: filepath.Join(dir, "head"), Base: filepath.Join(dir, "base")}
 
 	// Drop leftovers from an earlier run of the same PR/commit.
@@ -84,6 +96,8 @@ func (c Cache) Prepare(ctx context.Context, workspace, repo string, pr prb.PR) (
 	}
 
 	cleanup := func() error {
+		// Review contexts get cancelled on quit; cleanup must still run.
+		ctx := context.WithoutCancel(ctx)
 		var errs []error
 		for _, p := range []string{wt.Head, wt.Base} {
 			if _, err := c.git(ctx, repoDir, "worktree", "remove", "--force", p); err != nil {
@@ -100,4 +114,13 @@ func (c Cache) git(ctx context.Context, dir string, args ...string) (string, err
 	var out bytes.Buffer
 	err := c.Exec(ctx, execx.Cmd{Name: "git", Args: args, Dir: dir, Stdout: &out})
 	return strings.TrimSpace(out.String()), err
+}
+
+// contained fails unless p is strictly under c.Root.
+func (c Cache) contained(p string) error {
+	rel, err := filepath.Rel(c.Root, p)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("ruta fuera de la caché: %s", p)
+	}
+	return nil
 }
