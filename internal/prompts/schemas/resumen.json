@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["resumen", "triviales"],
+  "properties": {
+    "resumen": {"type": "string", "description": "Qué cambia el PR y para qué, en 3 a 6 líneas."},
+    "triviales": {"type": "array", "items": {"type": "string"}, "description": "Rutas de los archivos cuyo cambio no puede alterar el comportamiento."}
+  }
+}
