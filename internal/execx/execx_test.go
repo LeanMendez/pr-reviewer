@@ -87,3 +87,18 @@ func TestFakeNonZeroAndNilWriters(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestRealTimeoutWithGrandchildHoldingPipe(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	var out bytes.Buffer
+	start := time.Now()
+	// The background sleep inherits stdout and outlives the killed shell.
+	err := Real()(ctx, Cmd{Name: "sh", Args: []string{"-c", "sleep 30 & wait"}, Stdout: &out})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("want DeadlineExceeded, got %v", err)
+	}
+	if d := time.Since(start); d > 10*time.Second {
+		t.Fatalf("Wait hung for %v", d)
+	}
+}

@@ -1,0 +1,2 @@
+{"type":"assistant","message":{"content":[{"type":"text","text":"hola"}]}}
+{"type":"result","subtype":"error_during_execution","is_error":true,"result":"se rompió"}

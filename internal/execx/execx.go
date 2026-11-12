@@ -8,7 +8,11 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"time"
 )
+
+// waitDelay bounds how long Wait lingers on I/O after the process is killed.
+const waitDelay = 5 * time.Second
 
 // Cmd describes a process to run. Nil Stdin/Stdout/Stderr are discarded.
 type Cmd struct {
@@ -39,6 +43,8 @@ func Real() Exec {
 	return func(ctx context.Context, c Cmd) error {
 		cmd := exec.CommandContext(ctx, c.Name, c.Args...)
 		cmd.Dir = c.Dir
+		// A killed process whose grandchildren keep the pipes open must not hang Wait.
+		cmd.WaitDelay = waitDelay
 		cmd.Stdin = c.Stdin
 		cmd.Stdout = c.Stdout
 		var captured bytes.Buffer
