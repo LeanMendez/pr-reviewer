@@ -93,20 +93,23 @@ func (r Runner) Run(ctx context.Context, s Spec, onActivity func(Activity)) (jso
 		defer cancel()
 	}
 
-	var logf *os.File
+	var logw io.Writer
 	if r.LogDir != "" {
-		if err := os.MkdirAll(r.LogDir, 0o755); err == nil {
-			logf, _ = os.Create(filepath.Join(r.LogDir, filepath.Base(s.Name)+".jsonl"))
+		if err := os.MkdirAll(r.LogDir, 0o755); err != nil {
+			return nil, &AgentError{s.Name, fmt.Errorf("crear directorio de logs: %w", err)}
 		}
-		if logf != nil {
-			defer logf.Close()
+		f, err := os.Create(filepath.Join(r.LogDir, filepath.Base(s.Name)+".jsonl"))
+		if err != nil {
+			return nil, &AgentError{s.Name, fmt.Errorf("crear log: %w", err)}
 		}
+		defer f.Close()
+		logw = f
 	}
 
 	pr, pw := io.Pipe()
 	resCh := make(chan streamResult, 1)
 	go func() {
-		res := parseStream(pr, s.Name, s.Dir, logf, onActivity)
+		res := parseStream(pr, s.Name, s.Dir, logw, onActivity)
 		io.Copy(io.Discard, pr) // keep draining so the process never blocks on a full pipe
 		resCh <- res
 	}()
@@ -121,18 +124,35 @@ func (r Runner) Run(ctx context.Context, s Spec, onActivity func(Activity)) (jso
 	pw.Close()
 	res := <-resCh
 
-	if err != nil {
+	// A log write failure never aborts the agent; it is reported only when
+	// the run fails, joined to the returned error.
+	fail := func(err error) (json.RawMessage, error) {
+		if res.logErr != nil {
+			err = errors.Join(err, fmt.Errorf("escribir log: %w", res.logErr))
+		}
 		return nil, &AgentError{s.Name, err}
+	}
+	if err != nil {
+		if res.isError && res.message != "" {
+			err = fmt.Errorf("%w: %s", err, res.message)
+		}
+		return fail(err)
+	}
+	if res.readErr != nil {
+		return fail(fmt.Errorf("leer salida del agente: %w", res.readErr))
 	}
 	if res.isError {
 		msg := res.message
 		if msg == "" {
 			msg = "el agente terminó con error"
 		}
-		return nil, &AgentError{s.Name, errors.New(msg)}
+		return fail(errors.New(msg))
 	}
 	if len(res.output) == 0 {
-		return nil, &AgentError{s.Name, ErrNoOutput}
+		if res.malformed > 0 {
+			return fail(fmt.Errorf("%w (el stream tuvo %d línea(s) con JSON inválido)", ErrNoOutput, res.malformed))
+		}
+		return fail(ErrNoOutput)
 	}
 	return res.output, nil
 }

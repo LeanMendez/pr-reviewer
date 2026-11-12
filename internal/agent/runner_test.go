@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -177,5 +178,75 @@ func TestSemaphoreRespectsContext(t *testing.T) {
 	defer cancel()
 	if _, err := r.Run(ctx, Spec{Name: "x"}, nil); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestRunOversizedLineKeepsResult(t *testing.T) {
+	big := `{"type":"user","pad":"` + strings.Repeat("x", maxLine+1024) + `"}` + "\n"
+	stream := big + fixture(t, "stream_ok.jsonl")
+	dir := t.TempDir()
+	r := okRunner(stream, nil)
+	r.LogDir = dir
+	out, err := r.Run(context.Background(), Spec{Name: "ag", Dir: "/w"}, nil)
+	if err != nil || string(out) != `{"hallazgos":[]}` {
+		t.Fatalf("out=%s err=%v", out, err)
+	}
+	got, _ := os.ReadFile(filepath.Join(dir, "ag.jsonl"))
+	if !strings.Contains(string(got), `"type":"user"`) || !strings.HasSuffix(string(got), "\n") {
+		t.Fatal("oversized line missing from log")
+	}
+}
+
+func TestRunReadError(t *testing.T) {
+	boom := errors.New("boom de lectura")
+	r := Runner{Bin: "claude", Exec: func(ctx context.Context, c execx.Cmd) error {
+		c.Stdout.Write([]byte("{\"type\":\"system\"}\n"))
+		c.Stdout.(*io.PipeWriter).CloseWithError(boom)
+		return nil
+	}}
+	_, err := r.Run(context.Background(), Spec{Name: "x"}, nil)
+	if !errors.Is(err, boom) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestRunMalformedResultLine(t *testing.T) {
+	_, err := okRunner("{\"type\":\"result\",\"is_error\":fal\n", nil).Run(context.Background(), Spec{Name: "x"}, nil)
+	if !errors.Is(err, ErrNoOutput) || !strings.Contains(err.Error(), "inválid") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestRunExitKeepsStreamDiagnostic(t *testing.T) {
+	r := Runner{Bin: "claude", Exec: execx.Fake(func(execx.Cmd) (string, string, int) {
+		return fixture(t, "stream_error.jsonl"), "", 1
+	})}
+	_, err := r.Run(context.Background(), Spec{Name: "x"}, nil)
+	var ee *execx.ExitError
+	if !errors.As(err, &ee) || !strings.Contains(err.Error(), "se rompió") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestRunUnwritableLogDir(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "file")
+	os.WriteFile(blocker, nil, 0o644)
+	var called bool
+	r := okRunner(fixture(t, "stream_ok.jsonl"), func(execx.Cmd) { called = true })
+	r.LogDir = filepath.Join(blocker, "logs") // parent is a file: MkdirAll fails
+	_, err := r.Run(context.Background(), Spec{Name: "x"}, nil)
+	if err == nil || called {
+		t.Fatalf("err=%v called=%v", err, called)
+	}
+}
+
+type failWriter struct{}
+
+func (failWriter) Write([]byte) (int, error) { return 0, errors.New("disco lleno") }
+
+func TestLogWriteFailureDoesNotAbortButIsReportedOnFailure(t *testing.T) {
+	res := parseStream(strings.NewReader(fixture(t, "stream_ok.jsonl")), "a", "/w", failWriter{}, nil)
+	if string(res.output) != `{"hallazgos":[]}` || res.logErr == nil {
+		t.Fatalf("res = %+v", res)
 	}
 }
