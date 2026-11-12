@@ -49,6 +49,10 @@ const (
 	StatusSinConfirmar        Status = "sin_confirmar"
 	StatusMenor               Status = "menor"
 	StatusDescartadoPorJueces Status = "descartado_por_jueces"
+	// StatusFiltrado is a Group B finding hidden by the Group B filter: no
+	// confirmed Group A finding in its file or function. It is kept for the
+	// record and never counts.
+	StatusFiltrado Status = "filtrado"
 )
 
 // FixStatusARevisar marks a fix the judges flagged as violating a repo rule.

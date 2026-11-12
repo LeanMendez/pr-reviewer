@@ -29,6 +29,7 @@ func TestComputeVerdict(t *testing.T) {
 			f(GroupA, SeverityCritico, OriginIntroducido, StatusRefutado),
 			f(GroupA, SeverityCritico, OriginIntroducido, StatusDescartadoPorJueces),
 			f(GroupA, SeverityCritico, OriginIntroducido, StatusCandidato),
+			f(GroupA, SeverityCritico, OriginIntroducido, StatusFiltrado),
 		}, false, VerdictAprobar, false},
 		{"confirmado gana a dudoso", []Finding{
 			f(GroupA, SeverityAlto, OriginIncierto, StatusSinConfirmar),

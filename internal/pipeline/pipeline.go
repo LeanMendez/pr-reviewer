@@ -7,7 +7,9 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"path"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -65,9 +67,20 @@ type Result struct {
 	Unreviewed        []string
 	RuleFiles         []rules.RuleFile
 	FailedAgents      []string
+	Failures          []Failure
 	AgentCount        int
 	Started           time.Time
 	Finished          time.Time
+}
+
+// Failure is a failed or timed-out agent and what the review lost with it,
+// so the report can say so even when the synthesis failed too.
+type Failure struct {
+	Agent     string   // agent name, as in FailedAgents
+	Role      string   // prompt role: resumen, superior_plan, bugs, validador_bugs, juez...
+	Files     []string // a specialist's files, or the file of a validator's candidate
+	Candidate string   // validators: the ID of the finding left sin_confirmar
+	Reason    string   // the cause: "se venció el tiempo", the process error or "salida inválida: ..."
 }
 
 // Agent names of the single-instance roles. Specialists are named after
@@ -79,12 +92,18 @@ const (
 	nameSintesis = "superior_sintesis"
 )
 
-// specialistRoles are the specialists in report order, with the config role
-// that picks their model.
-var specialistRoles = []struct {
+// reasonFiltrado is the reason of a Group B finding the filter hides.
+const reasonFiltrado = "Grupo B sin hallazgo del Grupo A en el mismo archivo o función"
+
+// specialistRole is a specialist's prompt role and the config role that
+// picks its model.
+type specialistRole struct {
 	prompt string
 	cfg    config.Role
-}{
+}
+
+// specialistRoles are the specialists in report order.
+var specialistRoles = []specialistRole{
 	{prompts.RoleBugs, config.RoleBugs},
 	{prompts.RoleSeguridad, config.RoleSeguridad},
 	{prompts.RoleReglas, config.RoleReglas},
@@ -93,8 +112,9 @@ var specialistRoles = []struct {
 
 // Run executes the stages of req.Mode in order and returns the review. A
 // failed or timed-out agent never stops the others nor the review: it lands
-// in FailedAgents and makes the review incomplete. Run only fails for an
-// unknown mode, unreadable rules or a cancelled ctx.
+// in FailedAgents and Failures and makes the review incomplete. Findings are
+// never dropped: the ones the rules set aside keep a status that says why.
+// Run only fails for an unknown mode, unreadable rules or a cancelled ctx.
 //
 // Events go to events when it is not nil; the caller must drain it. Run
 // sends nothing after it returns and never closes it.
@@ -145,7 +165,10 @@ type job struct {
 
 // failure is a failed agent and the line that tells the synthesis what the
 // review lost because of it.
-type failure struct{ name, detail string }
+type failure struct {
+	Failure
+	detail string
+}
 
 func (r *run) review() (Result, error) {
 	res := Result{Repo: r.req.Repo, PR: r.req.PR.PullRequest, Mode: r.mode, Started: r.d.Now()}
@@ -183,7 +206,8 @@ func (r *run) review() (Result, error) {
 	}
 
 	for _, f := range r.failed {
-		res.FailedAgents = append(res.FailedAgents, f.name)
+		res.FailedAgents = append(res.FailedAgents, f.Agent)
+		res.Failures = append(res.Failures, f.Failure)
 	}
 	incomplete := len(r.failed) > 0 || len(r.pre.Unreviewed) > 0
 	res.Verdict, res.IncompleteWarning = finding.ComputeVerdict(r.findings, incomplete)
@@ -198,13 +222,25 @@ func (r *run) review() (Result, error) {
 
 // Stage 1: deterministic checks. The diff comes without the generated files
 // (prb --exclude), so those, and the lockfile changes among them, are only
-// visible in the PR diffstat.
+// visible in the PR diffstat. A non-generated file of the diffstat that the
+// diff does not bring at all was never reviewed.
 func (r *run) prechecks() error {
 	pre := prechecks.Run(r.req.PR.PullRequest, r.req.Diff, r.d.Cfg)
 	if fs := r.req.PR.Files; fs != nil {
 		stat := prechecks.Summarize(fs.Files, r.d.Cfg)
 		pre.Excluded = union(pre.Excluded, stat.Excluded)
 		pre.Sensitive = union(pre.Sensitive, stat.Sensitive)
+		inDiff := map[string]bool{}
+		for _, p := range slices.Concat(paths(r.req.Diff.Files), r.req.Diff.OmittedFiles) {
+			inDiff[p] = true
+		}
+		var missing []string
+		for _, f := range fs.Files {
+			if !inDiff[f.Path] && !prechecks.IsGenerated(f.Path) {
+				missing = append(missing, f.Path)
+			}
+		}
+		pre.Unreviewed = union(pre.Unreviewed, missing)
 	}
 	excluded := map[string]bool{}
 	for _, p := range pre.Excluded {
@@ -265,11 +301,13 @@ type planOut struct {
 }
 
 // Stage 3: the summary and, but in ligero, the superior's plan. Ligero
-// always runs bugs and reglas over every file. When the plan fails, the four
-// specialists review every file.
+// always runs bugs and reglas over every file. When the plan fails or
+// assigns nothing while there are files to review, it counts as failed and
+// the four specialists review every file.
 func (r *run) plan() error {
 	if out, err := call[summaryOut](r, StagePlan, nameResumen, prompts.RoleResumen, config.RoleResumen, r.input()); err != nil {
-		r.fail(nameResumen, "falló el agente resumen: los demás agentes trabajaron sin el resumen inicial")
+		r.fail(Failure{Agent: nameResumen, Role: prompts.RoleResumen, Reason: reasonFor(err)},
+			"falló el agente resumen: los demás agentes trabajaron sin el resumen inicial")
 	} else {
 		r.summary, r.trivial = strings.TrimSpace(out.Summary), out.Trivial
 	}
@@ -281,12 +319,20 @@ func (r *run) plan() error {
 	in := r.input()
 	in.Summary = withTrivial(r.summary, r.trivial)
 	out, err := call[planOut](r, StagePlan, namePlan, prompts.RoleSuperiorPlan, config.RoleSuperior, in)
-	if err != nil {
-		r.fail(namePlan, "falló el agente superior_plan: los cuatro especialistas revisaron todos los archivos")
-		r.jobs = r.fullPlan(prompts.RoleBugs, prompts.RoleSeguridad, prompts.RoleReglas, prompts.RoleTests)
-		return nil
+	var jobs []job
+	if err == nil {
+		jobs = r.jobsFrom(out)
 	}
-	r.jobs = r.jobsFrom(out)
+	if err != nil || (len(jobs) == 0 && len(r.files) > 0) {
+		reason := "el plan no asignó ningún archivo revisable"
+		if err != nil {
+			reason = reasonFor(err)
+		}
+		r.fail(Failure{Agent: namePlan, Role: prompts.RoleSuperiorPlan, Reason: reason},
+			"falló el agente superior_plan: los cuatro especialistas revisaron todos los archivos")
+		jobs = r.fullPlan(prompts.RoleBugs, prompts.RoleSeguridad, prompts.RoleReglas, prompts.RoleTests)
+	}
+	r.jobs = jobs
 	return nil
 }
 
@@ -320,26 +366,55 @@ func (r *run) fullPlan(roles ...string) []job {
 	return jobs
 }
 
-// jobsFrom turns the plan into specialist instances, one per group, keeping
-// only the paths of reviewable files and dropping empty groups.
+// jobsFrom turns the plan into specialist instances, one per group. Plan
+// paths are normalized and matched against the reviewable files; unknown
+// ones are dropped, and so are empty groups. Go enforces the plan's own
+// coverage rule, so a plan cannot leave code unread: every reviewable file
+// the plan left out of bugs or reglas gets an extra instance of that role.
+// A plan that assigns nothing yields no jobs.
 func (r *run) jobsFrom(p planOut) []job {
 	byPath := map[string]prb.DiffFile{}
 	for _, f := range r.files {
 		byPath[f.Path] = f
 	}
 	groups := map[string][][]prb.DiffFile{}
+	assigned := map[string]map[string]bool{} // role → paths in its groups
 	for _, s := range p.Specialists {
+		if !slices.ContainsFunc(specialistRoles, func(sr specialistRole) bool { return sr.prompt == s.Role }) {
+			continue
+		}
 		for _, g := range s.Groups {
 			var fs []prb.DiffFile
-			for _, path := range g {
-				f, ok := byPath[strings.TrimSpace(path)]
+			for _, raw := range g {
+				f, ok := byPath[planPath(raw)]
 				if ok && !slices.ContainsFunc(fs, func(x prb.DiffFile) bool { return x.Path == f.Path }) {
 					fs = append(fs, f)
 				}
 			}
-			if len(fs) > 0 {
-				groups[s.Role] = append(groups[s.Role], fs)
+			if len(fs) == 0 {
+				continue
 			}
+			groups[s.Role] = append(groups[s.Role], fs)
+			if assigned[s.Role] == nil {
+				assigned[s.Role] = map[string]bool{}
+			}
+			for _, f := range fs {
+				assigned[s.Role][f.Path] = true
+			}
+		}
+	}
+	if len(groups) == 0 {
+		return nil
+	}
+	for _, role := range []string{prompts.RoleBugs, prompts.RoleReglas} {
+		var rest []prb.DiffFile
+		for _, f := range r.files {
+			if !assigned[role][f.Path] {
+				rest = append(rest, f)
+			}
+		}
+		if len(rest) > 0 {
+			groups[role] = append(groups[role], rest)
 		}
 	}
 	var jobs []job
@@ -362,7 +437,8 @@ type specialistOut struct {
 }
 
 // Stage 4: the specialists, in parallel. Critico and alto findings are
-// candidates for stage 5; medio and bajo are not validated one by one.
+// candidates for stage 5, always in Group A (a grave finding is never minor
+// quality); medio and bajo are not validated one by one.
 func (r *run) specialists() error {
 	outs := make([]specialistOut, len(r.jobs))
 	errs := make([]error, len(r.jobs))
@@ -379,14 +455,15 @@ func (r *run) specialists() error {
 
 	for i, j := range r.jobs {
 		if errs[i] != nil {
-			r.fail(j.name, fmt.Sprintf("falló el agente %s (%s) y no revisó: %s", j.name, j.role, quoted(paths(j.files))))
+			r.fail(Failure{Agent: j.name, Role: j.role, Files: paths(j.files), Reason: reasonFor(errs[i])},
+				fmt.Sprintf("falló el agente %s (%s) y no revisó: %s", j.name, j.role, quoted(paths(j.files))))
 			continue
 		}
 		for _, f := range outs[i].Findings {
 			f.ID, f.Role = r.newID(j.role), j.role
 			f.Status = finding.StatusConfirmado
 			if f.Severity.Grave() {
-				f.Status = finding.StatusCandidato
+				f.Status, f.Group = finding.StatusCandidato, finding.GroupA
 			}
 			f.FixStatus, f.Reason, f.Votes = "", "", nil
 			r.sources[f.ID] = j.files
@@ -421,7 +498,7 @@ func (r *run) candidates() []int {
 // confirmed Group A findings.
 func (r *run) validate() error {
 	idx := r.candidates()
-	names := make([]string, len(idx))
+	names, promptRoles := make([]string, len(idx)), make([]string, len(idx))
 	outs := make([]validatorOut, len(idx))
 	errs := make([]error, len(idx))
 	var g errgroup.Group
@@ -431,7 +508,7 @@ func (r *run) validate() error {
 		if c.Role == prompts.RoleReglas {
 			promptRole, role = prompts.RoleValidadorReglas, config.RoleValidadorReglas
 		}
-		names[k] = promptRole + "-" + c.ID
+		names[k], promptRoles[k] = promptRole+"-"+c.ID, promptRole
 		in := r.input()
 		in.Files, in.Candidate = r.sources[c.ID], &c
 		g.Go(func() error {
@@ -445,12 +522,13 @@ func (r *run) validate() error {
 		f := &r.findings[i]
 		if errs[k] != nil {
 			f.Status, f.Reason = finding.StatusSinConfirmar, "no se pudo validar: falló el validador"
-			r.fail(names[k], fmt.Sprintf("falló el agente %s: el candidato %s en %q quedó sin confirmar", names[k], f.ID, f.File))
+			r.fail(Failure{Agent: names[k], Role: promptRoles[k], Files: []string{f.File}, Candidate: f.ID, Reason: reasonFor(errs[k])},
+				fmt.Sprintf("falló el agente %s: el candidato %s en %q quedó sin confirmar", names[k], f.ID, f.File))
 			continue
 		}
 		applyValidation(f, outs[k])
 	}
-	r.findings = finding.FilterGroupB(r.findings)
+	r.filterGroupB()
 	return nil
 }
 
@@ -533,7 +611,8 @@ func (r *run) judge() error {
 	for k, j := range judges {
 		votes[k] = map[string]finding.JudgeVote{}
 		if errs[k] != nil {
-			r.fail(j.name, fmt.Sprintf("falló el agente %s: sus votos no cuentan", j.name))
+			r.fail(Failure{Agent: j.name, Role: prompts.RoleJuez, Reason: reasonFor(errs[k])},
+				fmt.Sprintf("falló el agente %s: sus votos no cuentan", j.name))
 			continue
 		}
 		for _, v := range outs[k].Votes {
@@ -547,8 +626,31 @@ func (r *run) judge() error {
 		id := r.findings[i].ID
 		r.findings[i] = finding.ApplyJudges(r.findings[i], votes[0][id], votes[1][id])
 	}
-	r.findings = finding.FilterGroupB(r.findings)
+	r.filterGroupB()
 	return nil
+}
+
+// filterGroupB applies the Group B filter without dropping anything: a shown
+// Group B finding with no confirmed Group A finding in its file or function
+// becomes filtrado, with the reason, and stays for findings.json. Refuted and
+// discarded findings keep their own status.
+func (r *run) filterGroupB() {
+	kept := map[string]bool{}
+	for _, f := range finding.FilterGroupB(r.findings) {
+		kept[f.ID] = true
+	}
+	for i := range r.findings {
+		f := &r.findings[i]
+		switch f.Status {
+		case finding.StatusConfirmado, finding.StatusSinConfirmar, finding.StatusMenor:
+		default:
+			continue
+		}
+		if kept[f.ID] {
+			continue
+		}
+		f.Status, f.Reason = finding.StatusFiltrado, reasonFiltrado
+	}
 }
 
 type synthesisOut struct {
@@ -568,7 +670,8 @@ func (r *run) synthesize() error {
 	in.Incomplete = r.incomplete()
 	out, err := call[synthesisOut](r, StageReport, nameSintesis, prompts.RoleSuperiorSintesis, config.RoleSuperior, in)
 	if err != nil {
-		r.fail(nameSintesis, "falló el agente superior_sintesis")
+		r.fail(Failure{Agent: nameSintesis, Role: prompts.RoleSuperiorSintesis, Reason: reasonFor(err)},
+			"falló el agente superior_sintesis")
 		return nil
 	}
 	r.phrase = strings.TrimSpace(out.Phrase)
@@ -578,20 +681,38 @@ func (r *run) synthesize() error {
 	return nil
 }
 
-// capMinor keeps the first MaxMinorDetails bajo findings that are shown
-// (confirmado or sin_confirmar) and sends the rest to the minor details.
+// capMinor keeps MaxMinorDetails of the shown (confirmado or sin_confirmar)
+// bajo findings and sends the rest to the minor details. Slots go first to
+// the Group A findings from the PR, then to the rest of Group A (uncertain
+// origin), then to Group B, each in order; preexisting findings belong to
+// the grey section and never take one. So nothing that does not count can
+// push a finding that counts out of the verdict.
 func (r *run) capMinor() {
-	kept := 0
-	for i := range r.findings {
-		f := &r.findings[i]
-		if f.Severity != finding.SeverityBajo || (f.Status != finding.StatusConfirmado && f.Status != finding.StatusSinConfirmar) {
-			continue
+	rank := func(f finding.Finding) int {
+		switch {
+		case f.Origin == finding.OriginPreexistente:
+			return -1
+		case f.Group == finding.GroupA && f.Origin.FromPR():
+			return 0
+		case f.Group == finding.GroupA:
+			return 1
 		}
-		if kept < r.d.Cfg.Thresholds.MaxMinorDetails {
-			kept++
-			continue
+		return 2
+	}
+	slots := r.d.Cfg.Thresholds.MaxMinorDetails
+	for want := 0; want <= 2; want++ {
+		for i := range r.findings {
+			f := &r.findings[i]
+			if f.Severity != finding.SeverityBajo || rank(*f) != want ||
+				(f.Status != finding.StatusConfirmado && f.Status != finding.StatusSinConfirmar) {
+				continue
+			}
+			if slots > 0 {
+				slots--
+				continue
+			}
+			f.Status = finding.StatusMenor
 		}
-		f.Status = finding.StatusMenor
 	}
 }
 
@@ -640,7 +761,7 @@ func call[T any](r *run, stage Stage, name, promptRole string, role config.Role,
 	}, func(act agent.Activity) { send(AgentActivity, act.Text, nil) })
 	if err == nil {
 		if derr := json.Unmarshal(raw, &out); derr != nil {
-			err = fmt.Errorf("agente %s: salida inválida: %w", name, derr)
+			err = fmt.Errorf("salida inválida: %w", derr)
 		}
 	}
 	if err != nil {
@@ -662,8 +783,27 @@ func (r *run) emit(e Event) {
 	}
 }
 
-func (r *run) fail(name, detail string) {
-	r.failed = append(r.failed, failure{name, detail})
+// fail records a failed agent: f for the report, detail for the synthesis.
+func (r *run) fail(f Failure, detail string) {
+	r.failed = append(r.failed, failure{f, detail})
+}
+
+// reasonFor is the cause of an agent failure, for the report.
+func reasonFor(err error) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "se venció el tiempo"
+	}
+	var ae *agent.AgentError
+	if errors.As(err, &ae) {
+		err = ae.Err
+	}
+	return err.Error()
+}
+
+// planPath normalizes a path written by the plan: no surrounding spaces,
+// quotes or backticks, no "./" nor redundant separators.
+func planPath(p string) string {
+	return path.Clean(strings.Trim(strings.TrimSpace(p), "\"'`"))
 }
 
 // newID returns the next finding ID of a role: <rol>-<NNN>.
@@ -672,10 +812,10 @@ func (r *run) newID(role string) string {
 	return fmt.Sprintf("%s-%03d", role, r.ids[role])
 }
 
-// filesAt returns the reviewable file at path, if any.
-func (r *run) filesAt(path string) []prb.DiffFile {
+// filesAt returns the reviewable file at p, if any.
+func (r *run) filesAt(p string) []prb.DiffFile {
 	for _, f := range r.files {
-		if f.Path == path {
+		if f.Path == p {
 			return []prb.DiffFile{f}
 		}
 	}

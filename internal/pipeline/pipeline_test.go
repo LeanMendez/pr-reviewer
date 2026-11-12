@@ -210,10 +210,6 @@ func findingByID(t *testing.T, res Result, id string) finding.Finding {
 	return finding.Finding{}
 }
 
-func hasFinding(res Result, id string) bool {
-	return slices.ContainsFunc(res.Findings, func(f finding.Finding) bool { return f.ID == id })
-}
-
 func TestLigeroClean(t *testing.T) {
 	fake := newFake(nil)
 	res := mustRun(t, newDeps(fake), newRequest(t, ModeLigero))
@@ -673,16 +669,20 @@ func TestGroupBFilteredAfterValidation(t *testing.T) {
 
 	// The A finding of src/a.go was still a candidate before validation: the
 	// B finding next to it survives only because the filter runs afterwards.
-	if !hasFinding(res, "reglas-001") {
-		t.Error("the B finding next to a confirmed A must stay")
+	if f := findingByID(t, res, "reglas-001"); f.Status != finding.StatusConfirmado {
+		t.Errorf("the B finding next to a confirmed A must stay confirmado, got %s", f.Status)
 	}
+	// Filtered findings stay in the result, for findings.json, marked.
 	for _, id := range []string{"reglas-002", "reglas-003"} {
-		if hasFinding(res, id) {
-			t.Errorf("%s has no confirmed A finding in its file and must be filtered", id)
+		if f := findingByID(t, res, id); f.Status != finding.StatusFiltrado || f.Reason != reasonFiltrado {
+			t.Errorf("%s: status %s reason %q, want filtrado with %q", id, f.Status, f.Reason, reasonFiltrado)
 		}
 	}
-	if !hasFinding(res, "bugs-002") {
-		t.Error("refuted findings stay, to be shown with their reason")
+	if f := findingByID(t, res, "bugs-002"); f.Status != finding.StatusRefutado {
+		t.Errorf("refuted findings stay refutado, got %s", f.Status)
+	}
+	if len(res.Findings) != 5 {
+		t.Errorf("%d findings, want all 5 kept", len(res.Findings))
 	}
 }
 
@@ -690,9 +690,13 @@ func TestGroupBRefilteredAfterJudges(t *testing.T) {
 	fake := newFake(map[string]any{
 		prompts.RoleSuperiorPlan: planReply(map[string][][]string{"bugs": {{"src/a.go"}}, "reglas": {{"src/a.go"}}}),
 		prompts.RoleBugs:         specialistReply(hallazgo("src/a.go", 3, finding.SeverityMedio, finding.GroupA, "ancla")),
-		prompts.RoleReglas:       specialistReply(hallazgo("src/a.go", 8, finding.SeverityBajo, finding.GroupB, "menor")),
+		prompts.RoleReglas: specialistReply(
+			hallazgo("src/a.go", 8, finding.SeverityBajo, finding.GroupB, "menor"),
+			hallazgo("src/a.go", 9, finding.SeverityBajo, finding.GroupB, "menor-refutado"),
+		),
 		"juez_a": map[string]any{"votos": []finding.JudgeVote{
 			{FindingID: "bugs-001", Evidence: []string{"src/a.go:3"}},
+			{FindingID: "reglas-002", Evidence: []string{"src/a.go:9"}},
 		}},
 	})
 	res := mustRun(t, newDeps(fake), newRequest(t, ModeJudgment))
@@ -700,8 +704,11 @@ func TestGroupBRefilteredAfterJudges(t *testing.T) {
 	if f := findingByID(t, res, "bugs-001"); f.Status != finding.StatusDescartadoPorJueces {
 		t.Fatalf("anchor status %s, want descartado_por_jueces", f.Status)
 	}
-	if hasFinding(res, "reglas-001") {
-		t.Error("a B finding whose anchor the judges discarded must be filtered")
+	if f := findingByID(t, res, "reglas-001"); f.Status != finding.StatusFiltrado || f.Reason != reasonFiltrado {
+		t.Errorf("a B finding whose anchor the judges discarded must be filtrado, got %s %q", f.Status, f.Reason)
+	}
+	if f := findingByID(t, res, "reglas-002"); f.Status != finding.StatusDescartadoPorJueces {
+		t.Errorf("a B finding the judges discarded keeps that status, got %s", f.Status)
 	}
 }
 
@@ -926,5 +933,191 @@ func TestRunStopsWhenCancelled(t *testing.T) {
 	}
 	if n := len(fake.all()); n != 0 {
 		t.Errorf("%d agents ran after cancel", n)
+	}
+}
+
+func TestPlanCoverageEnforced(t *testing.T) {
+	twoFiles := func(t *testing.T) Request {
+		return newRequest(t, ModeExhaustivo, patchFile("src/a.go", "cambio_en_a"), patchFile("src/b.go", "cambio_en_b"))
+	}
+	seesOnly := func(t *testing.T, fake *fakeAgents, name, want, not string) {
+		t.Helper()
+		p := fake.byName(t, name).Prompt
+		if !strings.Contains(p, "+"+want) || strings.Contains(p, not) {
+			t.Errorf("%s must see only %s:\n%s", name, want, p)
+		}
+	}
+
+	t.Run("plan vacío", func(t *testing.T) {
+		fake := newFake(map[string]any{prompts.RoleSuperiorPlan: map[string]any{"especialistas": []any{}}})
+		res := mustRun(t, newDeps(fake), twoFiles(t))
+		for _, name := range []string{"bugs", "seguridad", "reglas", "tests"} {
+			p := fake.byName(t, name).Prompt
+			if !strings.Contains(p, "+cambio_en_a") || !strings.Contains(p, "+cambio_en_b") {
+				t.Errorf("%s must review every file when the plan is empty", name)
+			}
+		}
+		if !slices.Equal(res.FailedAgents, []string{"superior_plan"}) || res.Verdict != finding.VerdictRevisarAMano {
+			t.Errorf("failed %v verdict %s, want [superior_plan] and revisar_a_mano", res.FailedAgents, res.Verdict)
+		}
+		if len(res.Failures) != 1 || res.Failures[0].Reason != "el plan no asignó ningún archivo revisable" {
+			t.Errorf("failures = %+v", res.Failures)
+		}
+	})
+	t.Run("archivo omitido", func(t *testing.T) {
+		fake := newFake(map[string]any{prompts.RoleSuperiorPlan: planReply(map[string][][]string{
+			"bugs": {{"src/a.go"}}, "seguridad": {{"src/a.go"}}, "reglas": {{"src/a.go"}},
+		})})
+		res := mustRun(t, newDeps(fake), twoFiles(t))
+		want := []string{"bugs-1", "bugs-2", "reglas-1", "reglas-2", "resumen", "seguridad", "superior_plan", "superior_sintesis"}
+		if got := fake.names(); !slices.Equal(got, want) {
+			t.Fatalf("agents = %v, want %v", got, want)
+		}
+		seesOnly(t, fake, "bugs-2", "cambio_en_b", "cambio_en_a")
+		seesOnly(t, fake, "reglas-2", "cambio_en_b", "cambio_en_a")
+		if len(res.FailedAgents) != 0 || res.Verdict != finding.VerdictAprobar {
+			t.Errorf("failed %v verdict %s: Go's coverage keeps the review complete", res.FailedAgents, res.Verdict)
+		}
+	})
+	t.Run("rutas normalizadas", func(t *testing.T) {
+		fake := newFake(map[string]any{prompts.RoleSuperiorPlan: planReply(map[string][][]string{
+			"bugs":   {{`"src/a.go"`}, {"./src/b.go"}},
+			"reglas": {{" `src/a.go` ", "src/./b.go", "src/zz.go"}},
+		})})
+		mustRun(t, newDeps(fake), twoFiles(t))
+		want := []string{"bugs-1", "bugs-2", "reglas", "resumen", "superior_plan", "superior_sintesis"}
+		if got := fake.names(); !slices.Equal(got, want) {
+			t.Fatalf("agents = %v, want %v", got, want)
+		}
+		seesOnly(t, fake, "bugs-1", "cambio_en_a", "cambio_en_b")
+		seesOnly(t, fake, "bugs-2", "cambio_en_b", "cambio_en_a")
+	})
+}
+
+func TestGraveGroupBBecomesA(t *testing.T) {
+	fake := newFake(map[string]any{
+		prompts.RoleBugs: specialistReply(hallazgo("src/a.go", 3, finding.SeverityCritico, finding.GroupB, "critico-en-b")),
+	})
+	res := mustRun(t, newDeps(fake), newRequest(t, ModeLigero))
+
+	f := findingByID(t, res, "bugs-001")
+	if f.Group != finding.GroupA || f.Status != finding.StatusConfirmado {
+		t.Errorf("finding = %+v, want a confirmed Group A", f)
+	}
+	if res.Verdict != finding.VerdictPedirCambios {
+		t.Errorf("verdict %s, want pedir_cambios", res.Verdict)
+	}
+}
+
+func TestMinorCapPriority(t *testing.T) {
+	bajo := func(line int, group finding.Group, origin string) map[string]any {
+		h := hallazgo("src/a.go", line, finding.SeverityBajo, group, fmt.Sprintf("bajo-%d", line))
+		h["origen"] = origin
+		return h
+	}
+	fiveBajo := func(group finding.Group, origin string) []map[string]any {
+		var hs []map[string]any
+		for i := 1; i <= 5; i++ {
+			hs = append(hs, bajo(10+i, group, origin))
+		}
+		return hs
+	}
+	tests := []struct {
+		name  string
+		bugs  []map[string]any
+		menor []string
+		kept  []string
+	}{
+		{"preexistentes no ocupan lugar", fiveBajo(finding.GroupA, "preexistente"), nil,
+			[]string{"bugs-001", "bugs-002", "bugs-003", "bugs-004", "bugs-005"}},
+		{"incierto después de los del PR", fiveBajo(finding.GroupA, "incierto"), []string{"bugs-005"},
+			[]string{"bugs-001", "bugs-004"}},
+		{"grupo B después del grupo A", append(
+			[]map[string]any{hallazgo("src/a.go", 1, finding.SeverityMedio, finding.GroupA, "ancla")},
+			fiveBajo(finding.GroupB, "introducido")...), []string{"bugs-006"},
+			[]string{"bugs-002", "bugs-005"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := newFake(map[string]any{
+				prompts.RoleBugs:   specialistReply(tt.bugs...),
+				prompts.RoleReglas: specialistReply(bajo(40, finding.GroupA, "introducido")),
+			})
+			res := mustRun(t, newDeps(fake), newRequest(t, ModeLigero))
+			if f := findingByID(t, res, "reglas-001"); f.Status != finding.StatusConfirmado {
+				t.Errorf("the PR's Group A bajo must keep its slot, got %s", f.Status)
+			}
+			for _, id := range tt.menor {
+				if f := findingByID(t, res, id); f.Status != finding.StatusMenor {
+					t.Errorf("%s status %s, want menor", id, f.Status)
+				}
+			}
+			for _, id := range tt.kept {
+				if f := findingByID(t, res, id); f.Status != finding.StatusConfirmado {
+					t.Errorf("%s status %s, want confirmado", id, f.Status)
+				}
+			}
+			if res.Verdict != finding.VerdictAprobarConComentarios {
+				t.Errorf("verdict %s, want aprobar_con_comentarios", res.Verdict)
+			}
+		})
+	}
+}
+
+func TestFailuresDetailed(t *testing.T) {
+	fake := newFake(map[string]any{
+		prompts.RoleResumen:       &agent.AgentError{Agent: "resumen", Err: fmt.Errorf("claude: %w", context.DeadlineExceeded)},
+		prompts.RoleBugs:          errors.New("exit status 1: sin cuota"),
+		prompts.RoleSeguridad:     specialistReply(hallazgo("src/a.go", 3, finding.SeverityCritico, finding.GroupA, "inyeccion")),
+		prompts.RoleValidadorBugs: &agent.AgentError{Agent: "validador_bugs-seguridad-001", Err: errors.New("se cortó")},
+		"juez_a":                  errors.New("juez caído"),
+		// A JSON string instead of the synthesis object.
+		prompts.RoleSuperiorSintesis: "no es una síntesis",
+	})
+	res := mustRun(t, newDeps(fake), newRequest(t, ModeJudgment))
+
+	want := []Failure{
+		{Agent: "resumen", Role: "resumen", Reason: "se venció el tiempo"},
+		{Agent: "bugs", Role: "bugs", Files: []string{"src/a.go"}, Reason: "exit status 1: sin cuota"},
+		{Agent: "validador_bugs-seguridad-001", Role: "validador_bugs", Files: []string{"src/a.go"}, Candidate: "seguridad-001", Reason: "se cortó"},
+		{Agent: "juez_a", Role: "juez", Reason: "juez caído"},
+		{Agent: "superior_sintesis", Role: "superior_sintesis", Reason: "salida inválida"},
+	}
+	if len(res.Failures) != len(want) {
+		t.Fatalf("failures = %+v, want %d", res.Failures, len(want))
+	}
+	for i, w := range want {
+		g := res.Failures[i]
+		if g.Agent != w.Agent || g.Role != w.Role || !slices.Equal(g.Files, w.Files) || g.Candidate != w.Candidate ||
+			!strings.HasPrefix(g.Reason, w.Reason) {
+			t.Errorf("failure %d = %+v, want %+v", i, g, w)
+		}
+	}
+	var names []string
+	for _, f := range want {
+		names = append(names, f.Agent)
+	}
+	if !slices.Equal(res.FailedAgents, names) {
+		t.Errorf("FailedAgents = %v, want %v", res.FailedAgents, names)
+	}
+}
+
+func TestContextFilesMissingFromDiffAreUnreviewed(t *testing.T) {
+	req := newRequest(t, ModeLigero)
+	req.Diff.OmittedFiles = []string{"src/d.go"}
+	req.PR.Files = &prb.Files{Files: []prb.FileStat{
+		{Path: "src/a.go"}, {Path: "src/c.go"}, {Path: "dist/app.js"}, {Path: "src/d.go"}, {Path: "docs/logo.png"},
+	}}
+	fake := newFake(nil)
+	res := mustRun(t, newDeps(fake), req)
+
+	if want := []string{"src/d.go", "src/c.go"}; !slices.Equal(res.Unreviewed, want) {
+		t.Errorf("Unreviewed = %v, want %v", res.Unreviewed, want)
+	}
+	if res.Verdict != finding.VerdictRevisarAMano {
+		t.Errorf("verdict %s, want revisar_a_mano", res.Verdict)
+	}
+	if s := fake.byName(t, "superior_sintesis").Prompt; !strings.Contains(s, `"src/c.go" quedó sin revisar`) {
+		t.Errorf("the synthesis must name the file missing from the diff:\n%s", s)
 	}
 }

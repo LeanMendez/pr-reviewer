@@ -89,11 +89,13 @@ func TestApplyJudgesKeepsVotes(t *testing.T) {
 }
 
 func TestApplyJudgesOtherStatusesUnchanged(t *testing.T) {
-	f := base(SeverityMedio)
-	f.Status = StatusRefutado
-	got := ApplyJudges(f, vote(false, "a.go:1"), vote(false, "a.go:2"))
-	if got.Status != StatusRefutado || len(got.Votes) != 2 {
-		t.Errorf("got Status=%q votes=%d", got.Status, len(got.Votes))
+	for _, st := range []Status{StatusRefutado, StatusFiltrado} {
+		f := base(SeverityMedio)
+		f.Status = st
+		got := ApplyJudges(f, vote(false, "a.go:1"), vote(false, "a.go:2"))
+		if got.Status != st || len(got.Votes) != 2 {
+			t.Errorf("%s: got Status=%q votes=%d", st, got.Status, len(got.Votes))
+		}
 	}
 }
 
