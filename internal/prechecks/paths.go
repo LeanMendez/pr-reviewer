@@ -109,5 +109,10 @@ func normalize(p string) string { return strings.TrimPrefix(path.Clean(p), "./")
 
 func isEnvFile(p string) bool {
 	b := path.Base(p)
+	for _, t := range []string{".example", ".sample", ".template", ".dist"} {
+		if strings.HasSuffix(b, ".env"+t) {
+			return false
+		}
+	}
 	return b == ".env" || strings.HasPrefix(b, ".env.") || strings.HasSuffix(b, ".env")
 }

@@ -188,3 +188,27 @@ func TestSummarizeFromFileStats(t *testing.T) {
 		t.Errorf("summarize = %+v", sum)
 	}
 }
+
+func TestInvalidTaskIDPatternFallsBackToDefault(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.TaskIDPattern = "([unclosed"
+	r := Run(prb.PR{Title: "Arreglo", Description: strings.Repeat("d", 40)}, prb.Diff{}, cfg)
+	if len(r.Findings) != 1 || r.Findings[0].What != "El título no empieza con el ID de la tarea." {
+		t.Errorf("findings = %+v", r.Findings)
+	}
+	if r := Run(goodPR(), prb.Diff{}, cfg); len(r.Findings) != 0 {
+		t.Errorf("findings = %+v", r.Findings)
+	}
+}
+
+func TestEnvTemplatesAreNotFlagged(t *testing.T) {
+	for p, want := range map[string]int{
+		".env": 1, ".env.local": 1, "app/.env": 1,
+		".env.example": 0, ".env.sample": 0, ".env.template": 0, ".env.dist": 0,
+	} {
+		d := prb.Diff{Files: []prb.DiffFile{{Path: p, Status: "added", Patch: patch("+A=1")}}}
+		if r := Run(goodPR(), d, config.Defaults()); len(r.Findings) != want {
+			t.Errorf("%s: findings = %+v, want %d", p, r.Findings, want)
+		}
+	}
+}

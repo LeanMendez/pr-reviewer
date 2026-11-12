@@ -91,14 +91,16 @@ func oversize(lines, files int, cfg config.Config) bool {
 
 func processFindings(pr prb.PR, oversize bool, cfg config.Config) []finding.Finding {
 	var out []finding.Finding
-	if cfg.TaskIDPattern != "" {
-		if re, err := regexp.Compile(cfg.TaskIDPattern); err == nil && !re.MatchString(strings.TrimSpace(pr.Title)) {
-			out = append(out, processFinding(
-				"El título no empieza con el ID de la tarea.",
-				"Sin el ID no se puede enlazar el PR con su tarea ni rastrear el cambio.",
-				"Renombrá el PR para que empiece con el ID de la tarea, por ejemplo `CU-123 Descripción`.",
-				"título del PR: "+pr.Title))
-		}
+	re, err := regexp.Compile(cfg.TaskIDPattern)
+	if err != nil || cfg.TaskIDPattern == "" {
+		re = regexp.MustCompile(config.Defaults().TaskIDPattern)
+	}
+	if !re.MatchString(strings.TrimSpace(pr.Title)) {
+		out = append(out, processFinding(
+			"El título no empieza con el ID de la tarea.",
+			"Sin el ID no se puede enlazar el PR con su tarea ni rastrear el cambio.",
+			"Renombrá el PR para que empiece con el ID de la tarea, por ejemplo `CU-123 Descripción`.",
+			"título del PR: "+pr.Title))
 	}
 	if oversize && nonSpace(pr.Description) < minDescriptionChars {
 		out = append(out, processFinding(

@@ -107,3 +107,14 @@ func TestAssignmentForFallsBack(t *testing.T) {
 		t.Errorf("override: got %+v", got)
 	}
 }
+
+func TestLoadRejectsInvalidTaskIDPattern(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(p, []byte("patron_id_tarea: \"([unclosed\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := Load(p)
+	if err == nil || !strings.Contains(err.Error(), "patron_id_tarea") {
+		t.Fatalf("err = %v", err)
+	}
+}

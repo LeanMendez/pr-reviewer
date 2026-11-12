@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -98,6 +99,9 @@ func Load(path string) (cfg Config, found bool, err error) {
 	}
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return Defaults(), true, fmt.Errorf("leyendo %s: %w", path, err)
+	}
+	if _, err := regexp.Compile(cfg.TaskIDPattern); err != nil {
+		return Defaults(), true, fmt.Errorf("patron_id_tarea inválido en %s: %w", path, err)
 	}
 	return cfg, true, nil
 }
