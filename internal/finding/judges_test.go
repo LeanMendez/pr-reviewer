@@ -47,7 +47,7 @@ func TestApplyJudgesMinorEitherRefutes(t *testing.T) {
 }
 
 func TestApplyJudgesMinorBothNotWorth(t *testing.T) {
-	a, b := vote(true), vote(true)
+	a, b := vote(true, "a.go:1"), vote(true, "b.go:2")
 	a.Worth, b.Worth = false, false
 	if got := ApplyJudges(base(SeverityBajo), a, b).Status; got != StatusMenor {
 		t.Errorf("Status = %q, want menor", got)
@@ -94,5 +94,89 @@ func TestApplyJudgesOtherStatusesUnchanged(t *testing.T) {
 	got := ApplyJudges(f, vote(false, "a.go:1"), vote(false, "a.go:2"))
 	if got.Status != StatusRefutado || len(got.Votes) != 2 {
 		t.Errorf("got Status=%q votes=%d", got.Status, len(got.Votes))
+	}
+}
+
+func TestApplyJudgesNotWorthNeedsEvidence(t *testing.T) {
+	noEv := vote(true)
+	noEv.Worth = false
+	withEv := vote(true, "a.go:1")
+	withEv.Worth = false
+	tests := []struct {
+		name string
+		a, b JudgeVote
+	}{
+		{"both without evidence", noEv, noEv},
+		{"zero-value vote", withEv, JudgeVote{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ApplyJudges(base(SeverityMedio), tt.a, tt.b).Status; got != StatusConfirmado {
+				t.Errorf("Status = %q, want confirmado", got)
+			}
+		})
+	}
+}
+
+func TestApplyJudgesSecurityAndBugsNeverMenor(t *testing.T) {
+	a, b := vote(true, "a.go:1"), vote(true, "b.go:2")
+	a.Worth, b.Worth = false, false
+	for _, role := range []string{"seguridad", "bugs"} {
+		t.Run(role, func(t *testing.T) {
+			f := base(SeverityMedio)
+			f.Role = role
+			if got := ApplyJudges(f, a, b).Status; got != StatusConfirmado {
+				t.Errorf("Status = %q, want confirmado", got)
+			}
+			if got := ApplyJudges(f, vote(false, "a.go:1"), vote(true)).Status; got != StatusDescartadoPorJueces {
+				t.Errorf("refuted Status = %q, want descartado_por_jueces", got)
+			}
+		})
+	}
+}
+
+func TestApplyJudgesFixNeverMixesVotes(t *testing.T) {
+	a := vote(true)
+	a.FixComplies, a.RuleCited = false, "regla X"
+	b := vote(true)
+	b.FixComplies, b.RuleCited, b.AlternativeFix = false, "regla Y", "y"
+
+	got := ApplyJudges(base(SeverityAlto), a, b)
+	if got.Fix == "y" && !strings.Contains(got.Reason, "regla Y") && got.FixStatus != "" {
+		t.Errorf("mixed votes: %+v", got)
+	}
+	switch {
+	case got.Fix == "y":
+		if got.FixStatus != "" {
+			t.Errorf("replaced fix but FixStatus=%q", got.FixStatus)
+		}
+	case got.FixStatus == "a_revisar":
+		if !strings.Contains(got.Reason, "regla X") || strings.Contains(got.Reason, "regla Y") {
+			t.Errorf("Reason = %q", got.Reason)
+		}
+	default:
+		t.Errorf("fix untouched: %+v", got)
+	}
+	if got.Fix == "y" && strings.Contains(got.Reason, "regla X") {
+		t.Errorf("mixed: %+v", got)
+	}
+}
+
+func TestApplyJudgesIgnoresVotesForOtherFinding(t *testing.T) {
+	f := base(SeverityMedio)
+	other := vote(false, "a.go:1")
+	other.FindingID = "otro"
+	if got := ApplyJudges(f, other, vote(true)).Status; got != StatusConfirmado {
+		t.Errorf("foreign refute counted: %q", got)
+	}
+	viol := vote(true)
+	viol.FindingID, viol.FixComplies, viol.RuleCited, viol.AlternativeFix = "otro", false, "r", "x"
+	if got := ApplyJudges(f, viol, vote(true)); got.Fix != "orig" || got.FixStatus != "" {
+		t.Errorf("foreign fix verdict applied: %+v", got)
+	}
+	own := vote(false, "a.go:1")
+	own.FindingID = "f1"
+	if got := ApplyJudges(f, own, vote(true)).Status; got != StatusDescartadoPorJueces {
+		t.Errorf("own-ID refute ignored: %q", got)
 	}
 }
