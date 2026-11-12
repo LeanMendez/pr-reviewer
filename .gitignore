@@ -1,0 +1,4 @@
+bin/
+.superpowers/
+.playwright-mcp/
+.worktrees/
