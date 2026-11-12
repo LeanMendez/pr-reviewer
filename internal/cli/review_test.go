@@ -27,6 +27,8 @@ type fakeAgents struct {
 	mu    sync.Mutex
 	specs []agent.Spec
 	onRun func(agent.Spec) error
+	// critical makes bugs report a critico finding that the validator confirms.
+	critical bool
 }
 
 func (f *fakeAgents) Run(_ context.Context, s agent.Spec, _ func(agent.Activity)) (json.RawMessage, error) {
@@ -51,6 +53,17 @@ func (f *fakeAgents) Run(_ context.Context, s agent.Spec, _ func(agent.Activity)
 		r = map[string]any{"frase": "Nada importante.", "division": map[string]any{"necesaria": false, "partes": []any{}}}
 	case prompts.RoleJuez:
 		r = map[string]any{"votos": []any{}}
+	case prompts.RoleValidadorBugs, prompts.RoleValidadorReglas:
+		r = map[string]any{"resultado": "confirmado", "origen": "introducido", "evidencia": []string{"src/a.go:2"}, "motivo": "ok"}
+	case prompts.RoleBugs:
+		hs := []any{}
+		if f.critical {
+			hs = append(hs, map[string]any{
+				"archivo": "src/a.go", "linea": 2, "severidad": "critico", "origen": "introducido", "grupo": "A",
+				"que_pasa": "falla", "por_que": "Rompe pagos.", "solucion": "- a\n+ b", "evidencia": []string{"src/a.go:2"},
+			})
+		}
+		r = map[string]any{"hallazgos": hs, "dudas": []any{}}
 	default:
 		r = map[string]any{"hallazgos": []any{}, "dudas": []any{}}
 	}
@@ -166,10 +179,38 @@ func TestReviewBadMode(t *testing.T) {
 
 func TestReviewBadArgsIsUsageError(t *testing.T) {
 	h := newHarness(t)
-	for _, args := range [][]string{{"review", "stock"}, {"review", "stock", "abc"}, {"review", "stock", "1", "--nope"}} {
+	for _, args := range [][]string{{"review", "stock"}, {"review", "stock", "abc"}, {"review", "stock", "1", "--nope"},
+		{"review", "stock", "477"}, {"review", "stock", "477", "--mode", ""}, {"revisar", "stock", "477"}} {
 		if code, _ := h.run(context.Background(), args...); code != 2 {
 			t.Errorf("%v: code = %d, quiero 2", args, code)
 		}
+	}
+}
+
+func TestReviewNonApproveVerdict(t *testing.T) {
+	h := newHarness(t)
+	h.agents.critical = true
+	code, err := h.run(context.Background(), "review", "stock", "477", "--mode", "ligero")
+	if code != 20 {
+		t.Fatalf("code=%d err=%v stderr=%s", code, err, h.errw.String())
+	}
+	if handleError(err, &bytes.Buffer{}) != 20 {
+		t.Fatal("handleError debe propagar 20")
+	}
+	mdPath := filepath.Join(h.reports, "stock", "pr-477-20261112-1030", "review.md")
+	if _, statErr := os.Stat(mdPath); statErr != nil {
+		t.Fatalf("falta review.md: %v", statErr)
+	}
+	if !strings.Contains(h.out.String(), "Pedir cambios") || !strings.Contains(h.out.String(), mdPath) {
+		t.Fatalf("stdout: %q", h.out.String())
+	}
+}
+
+func TestReviewNilNow(t *testing.T) {
+	h := newHarness(t)
+	h.deps.Now = nil
+	if code, err := h.run(context.Background(), "review", "stock", "477", "--mode", "ligero"); code != 0 {
+		t.Fatalf("code=%d err=%v", code, err)
 	}
 }
 
@@ -233,6 +274,13 @@ func TestExitCode(t *testing.T) {
 		if got := ExitCode(v); got != want {
 			t.Errorf("%s: %d, quiero %d", v, got, want)
 		}
+	}
+}
+
+func TestUnknownVerdictHasMessage(t *testing.T) {
+	code, err := verdictResult("raro")
+	if code != 1 || err == nil || !strings.Contains(err.Error(), "veredicto desconocido: raro") {
+		t.Fatalf("code=%d err=%v", code, err)
 	}
 }
 

@@ -70,6 +70,14 @@ func newRootCmd(version string, deps func() (Deps, error)) *cobra.Command {
 		Version:       version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		Args: func(_ *cobra.Command, args []string) error {
+			if len(args) > 0 {
+				return usageError(fmt.Errorf("comando desconocido %q", args[0]))
+			}
+			return nil
+		},
+		// Runnable so Args validation applies to unknown subcommands.
+		RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
 	cmd.SetVersionTemplate("pr-review {{.Version}}\n")
 	cmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return usageError(err) })

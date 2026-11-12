@@ -68,6 +68,7 @@ func newReviewCmd(deps func() (Deps, error)) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// A missing --mode is an empty one: ParseMode rejects it.
 			m, err := pipeline.ParseMode(mode)
 			if err != nil {
 				return usageError(errors.New(errBadMode))
@@ -81,7 +82,6 @@ func newReviewCmd(deps func() (Deps, error)) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&mode, "mode", "", "modo de revisión: ligero, exhaustivo o judgment")
-	_ = cmd.MarkFlagRequired("mode")
 	return cmd
 }
 
@@ -137,7 +137,7 @@ func runReview(cmd *cobra.Command, d Deps, repoArg string, n int, mode pipeline.
 			printEvent(d.Err, ev)
 		}
 	}()
-	res, err := pipeline.Run(ctx, pipeline.Deps{Cfg: d.Cfg, Agents: d.Agents, Now: d.Now},
+	res, err := pipeline.Run(ctx, pipeline.Deps{Cfg: d.Cfg, Agents: d.Agents, Now: now},
 		pipeline.Request{Repo: ref, PR: pc, Diff: diff, Trees: trees, Mode: mode}, events)
 	close(events)
 	printer.Wait()
@@ -150,7 +150,11 @@ func runReview(cmd *cobra.Command, d Deps, repoArg string, n int, mode pipeline.
 	}
 	fmt.Fprintln(d.Out, report.VerdictLine(res))
 	fmt.Fprintln(d.Out, filepath.Join(dir, "review.md"))
-	if code := ExitCode(res.Verdict); code != 0 {
+	code, err := verdictResult(res.Verdict)
+	if err != nil {
+		return err
+	}
+	if code != 0 {
 		return &exitError{Code: code}
 	}
 	return nil
@@ -179,4 +183,14 @@ func printEvent(w interface{ Write([]byte) (int, error) }, ev pipeline.Event) {
 	case pipeline.AgentFailed:
 		fmt.Fprintf(w, "  ✗ %s: %v\n", ev.Agent, ev.Err)
 	}
+}
+
+// verdictResult is the exit code of a verdict. An unknown verdict is an error
+// with a message, so the process never exits 1 silently.
+func verdictResult(v finding.Verdict) (int, error) {
+	switch v {
+	case finding.VerdictAprobar, finding.VerdictAprobarConComentarios, finding.VerdictPedirCambios, finding.VerdictRevisarAMano:
+		return ExitCode(v), nil
+	}
+	return 1, fmt.Errorf("veredicto desconocido: %s", v)
 }
