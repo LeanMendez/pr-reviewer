@@ -1,0 +1,5 @@
+{"type":"system","subtype":"init"}
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"/w/src/a.go"}}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Grep","input":{"pattern":"TODO"}}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"StructuredOutput","input":{"hallazgos":[]}}]}}
+{"type":"result","subtype":"success","is_error":false,"structured_output":{"hallazgos":[]}}

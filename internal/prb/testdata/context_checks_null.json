@@ -1,0 +1,30 @@
+{
+  "repository": "ws/stock",
+  "pull_request": {
+    "id": 43,
+    "title": "Fix rounding",
+    "description": "",
+    "state": "OPEN",
+    "draft": false,
+    "url": "https://bitbucket.org/ws/stock/pull-requests/43",
+    "author": "Ana Perez",
+    "source": {"branch": "fix/rounding", "commit": "1112223334", "repository": "ws/stock"},
+    "destination": {"branch": "main", "commit": "4445556667", "repository": "ws/stock"},
+    "close_source_branch": false,
+    "created_on": "2026-11-11T10:00:00+00:00",
+    "updated_on": "2026-11-11T10:05:00+00:00",
+    "comment_count": 0,
+    "task_count": 0,
+    "review": {"approvals": 0, "changes_requested": 0, "reviewers": []}
+  },
+  "checks": null,
+  "mergeability": null,
+  "files": {"count": 0, "lines_added": 0, "lines_removed": 0, "files": []},
+  "commits": [],
+  "threads": {"total": 0, "unresolved": 0, "threads": []},
+  "tasks": {"total": 0, "unresolved": 0, "tasks": []},
+  "task_references": [],
+  "warnings": [
+    {"section": "checks", "code": "missing_scopes", "message": "no se pudieron leer los checks: faltan scopes"}
+  ]
+}

@@ -1,0 +1,2 @@
+{"type":"assistant","message":{"content":[{"type":"text","text":"hola"}]}}
+{"type":"result","subtype":"success","is_error":false,"result":"listo"}

@@ -1,0 +1,10 @@
+{
+  "error": {
+    "code": "missing_scopes",
+    "message": "el token no tiene los scopes necesarios",
+    "http_status": 403,
+    "required_scopes": [
+      "read:pullrequest:bitbucket"
+    ]
+  }
+}

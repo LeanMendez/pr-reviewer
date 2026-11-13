@@ -1,0 +1,45 @@
+{
+  "repository": "ws/stock",
+  "pull_request": {
+    "id": 42,
+    "title": "SAL-17 Add balance endpoint",
+    "description": "Adds GET /balance.",
+    "state": "OPEN",
+    "draft": true,
+    "url": "https://bitbucket.org/ws/stock/pull-requests/42",
+    "author": "Ana Perez",
+    "source": {"branch": "feature/SAL-17", "commit": "abc123def456", "repository": "ws/stock"},
+    "destination": {"branch": "main", "commit": "fff000aaa111", "repository": "ws/stock"},
+    "close_source_branch": true,
+    "created_on": "2026-11-10T14:03:11.123456+00:00",
+    "updated_on": "2026-11-11T09:30:00.000000+00:00",
+    "comment_count": 2,
+    "task_count": 1,
+    "review": {
+      "approvals": 0,
+      "changes_requested": 1,
+      "reviewers": [
+        {"name": "Bruno Gomez", "account_id": "557058:aaaa-bbbb", "role": "reviewer", "state": "changes_requested"},
+        {"name": "Carla Diaz", "role": "reviewer", "state": "pending"}
+      ]
+    }
+  },
+  "checks": {"overall": "pass", "passed": 2, "failed": 0, "pending": 0, "stopped": 0, "statuses": []},
+  "mergeability": {"mergeable": false, "mergeable_ignoring_permission": false, "blocking": ["minimum_approvals"], "checks": []},
+  "files": {
+    "count": 2,
+    "lines_added": 40,
+    "lines_removed": 5,
+    "files": [
+      {"path": "internal/balance/handler.go", "status": "added", "lines_added": 35, "lines_removed": 0},
+      {"path": "internal/api/router.go", "old_path": "internal/router.go", "status": "renamed", "lines_added": 5, "lines_removed": 5}
+    ]
+  },
+  "commits": [],
+  "threads": {"total": 0, "unresolved": 0, "threads": []},
+  "tasks": {"total": 1, "unresolved": 1, "tasks": [{"id": 9, "state": "UNRESOLVED", "body": "Add tests", "created_on": "2026-11-10T15:00:00+00:00"}]},
+  "task_references": [
+    {"id": "SAL-17", "kind": "custom_id", "confidence": "high", "url": "https://app.clickup.com/t/SAL-17", "found_in": [{"where": "title"}]}
+  ],
+  "warnings": []
+}

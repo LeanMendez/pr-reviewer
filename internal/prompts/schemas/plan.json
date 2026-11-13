@@ -1,0 +1,24 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["especialistas"],
+  "properties": {
+    "especialistas": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["rol", "grupos"],
+        "properties": {
+          "rol": {"type": "string", "enum": ["bugs", "seguridad", "reglas", "tests"]},
+          "grupos": {
+            "type": "array",
+            "minItems": 1,
+            "description": "Cada grupo es una lista de rutas y corre como una instancia aparte.",
+            "items": {"type": "array", "minItems": 1, "items": {"type": "string"}}
+          }
+        }
+      }
+    }
+  }
+}

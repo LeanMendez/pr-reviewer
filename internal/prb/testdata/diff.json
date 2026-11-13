@@ -1,0 +1,12 @@
+{
+  "total_files": 3,
+  "files": [
+    {"path": "internal/balance/handler.go", "status": "added", "lines_added": 3, "lines_removed": 0,
+     "patch": "diff --git a/internal/balance/handler.go b/internal/balance/handler.go\nnew file mode 100644\n--- /dev/null\n+++ b/internal/balance/handler.go\n@@ -0,0 +1,3 @@\n+package balance\n+\n+func Handler() {}\n"},
+    {"path": "assets/logo.png", "status": "modified", "binary": true, "lines_added": 0, "lines_removed": 0, "patch": ""},
+    {"path": "internal/big.go", "old_path": "internal/old.go", "status": "renamed", "lines_added": 900, "lines_removed": 10,
+     "patch": "", "truncated": true, "omitted_lines": 850, "patch_omitted": true}
+  ],
+  "omitted_files": ["vendor/x.go"],
+  "truncated": true
+}

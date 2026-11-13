@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["resultado", "origen", "evidencia", "motivo"],
+  "properties": {
+    "resultado": {"type": "string", "enum": ["confirmado", "refutado", "sin_resolver"]},
+    "origen": {"type": "string", "enum": ["introducido", "activado", "empeorado", "preexistente", "incierto"]},
+    "evidencia": {"type": "array", "items": {"type": "string"}, "description": "Referencias archivo:línea; las de base con el prefijo base:."},
+    "motivo": {"type": "string", "description": "Una o dos oraciones."}
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["frase", "division"],
+  "properties": {
+    "frase": {"type": "string", "description": "Una oración que va después del veredicto, sin nombrarlo."},
+    "division": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["necesaria", "partes"],
+      "properties": {
+        "necesaria": {"type": "boolean"},
+        "partes": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["titulo", "archivos", "lineas", "depende_de"],
+            "properties": {
+              "titulo": {"type": "string"},
+              "archivos": {"type": "array", "items": {"type": "string"}},
+              "lineas": {"type": "integer"},
+              "depende_de": {"type": "integer", "description": "Número (desde 1) de la parte que va antes, o 0."}
+            }
+          }
+        }
+      }
+    }
+  }
+}

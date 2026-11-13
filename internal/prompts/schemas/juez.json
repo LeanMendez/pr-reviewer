@@ -1,0 +1,25 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["votos"],
+  "properties": {
+    "votos": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "real", "vale_la_pena", "solucion_cumple", "evidencia", "regla_citada", "solucion_alternativa", "nota"],
+        "properties": {
+          "id": {"type": "string", "description": "El id del hallazgo, tal cual."},
+          "real": {"type": "boolean", "description": "¿Es real y es de este PR?"},
+          "vale_la_pena": {"type": "boolean", "description": "¿Vale la pena reportarlo, o es ruido?"},
+          "solucion_cumple": {"type": "boolean", "description": "¿La solución cumple las normas del repo?"},
+          "evidencia": {"type": "array", "items": {"type": "string"}, "description": "Referencias archivo:línea; las de base con el prefijo base:."},
+          "regla_citada": {"type": "string", "description": "Regla textual y su archivo si la solución la viola; si no, vacío."},
+          "solucion_alternativa": {"type": "string", "description": "Solución que cumple la regla; si no hace falta, vacío."},
+          "nota": {"type": "string", "description": "Una o dos oraciones."}
+        }
+      }
+    }
+  }
+}
