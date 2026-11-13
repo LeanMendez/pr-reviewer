@@ -34,10 +34,15 @@ func (a App) route(msg tea.Msg) (App, tea.Cmd) {
 	case screens.ReviewDoneMsg:
 		return a.reviewDone(msg)
 	case notifiedMsg:
+		if msg.err != nil {
+			a.list = a.list.WithNote("No pude avisar: " + msg.err.Error())
+		}
 		return a, nil
 	// Loads land on their screen even when the user already moved on.
 	case screens.RowsLoadedMsg:
 		a.list, cmd = update(a.list, msg)
+		// A load started before a review ended does not know about it.
+		a.list = a.reviews.markSaved(a.list)
 		return a, cmd
 	case screens.ReposLoadedMsg:
 		a.picker, cmd = update(a.picker, msg)
@@ -202,13 +207,11 @@ func (a App) reviewEvent(msg reviewEventMsg) (App, tea.Cmd) {
 // reviewDone records the end of a review. A review on screen goes on to its
 // report; one in the background marks its row and notifies the desktop.
 func (a App) reviewDone(msg screens.ReviewDoneMsg) (App, tea.Cmd) {
-	rv := a.reviews.finish(msg)
+	rv := a.reviews.finish(msg, a.now())
 	if rv == nil {
 		return a, nil
 	}
-	if msg.Dir != "" {
-		a.list = a.list.MarkReviewed(msg.PR, a.now())
-	}
+	a.list = a.reviews.markSaved(a.list)
 	if a.quitting {
 		if a.reviews.Running() == 0 {
 			return a, tea.Quit
@@ -280,20 +283,22 @@ func (a App) quit() (App, tea.Cmd) {
 }
 
 // confirmKey answers the quit question. Yes cancels every review and quits
-// when the last one has ended (worktrees removed); keys do nothing while
-// waiting.
+// when the last one has ended (worktrees removed). While asking or waiting,
+// a second ctrl+c quits at once: Run then cancels the reviews without
+// waiting for their cleanup.
 func (a App) confirmKey(msg tea.KeyPressMsg) (App, tea.Cmd) {
-	if a.quitting {
-		return a, nil
-	}
-	switch msg.String() {
-	case "s":
+	switch k := msg.String(); {
+	case k == "ctrl+c":
+		a.forced = true
+		return a, tea.Quit
+	case a.quitting: // waiting: only ctrl+c does something
+	case k == "s":
 		a.confirming, a.quitting = false, true
 		a.reviews.CancelAll()
 		if a.reviews.Running() == 0 {
 			return a, tea.Quit
 		}
-	case "n", "esc":
+	case k == "n" || k == "esc":
 		a.confirming = false
 	}
 	return a, nil

@@ -12,3 +12,9 @@ func TestKeyBackspace(t *testing.T) {
 		t.Errorf("Key(backspace) = %#v", Key("backspace"))
 	}
 }
+
+func TestKeyCtrlC(t *testing.T) {
+	if k, ok := Key("ctrl+c").(tea.KeyPressMsg); !ok || k.String() != "ctrl+c" {
+		t.Errorf("Key(ctrl+c) = %#v", Key("ctrl+c"))
+	}
+}

@@ -84,6 +84,7 @@ type App struct {
 
 	confirming bool // asking whether to quit with reviews running
 	quitting   bool // waiting for the cancelled reviews to end
+	forced     bool // quit with ctrl+c without waiting for the cleanup
 
 	width, height int
 }
@@ -121,14 +122,23 @@ func newApp(ctx context.Context, d app.Deps, s sys.System, start Start) App {
 }
 
 // Run opens the interface in the alternate screen and returns when the user
-// quits. If the program ends without asking (a signal), it cancels the
-// reviews still running and waits until they remove their worktrees.
+// quits. Reviews still running then (a signal ended the program, or the
+// user forced the quit) are cancelled.
 func Run(ctx context.Context, d app.Deps, start Start) error {
 	a := newApp(ctx, d, sys.System{Exec: d.Exec, LookPath: exec.LookPath}, start)
-	_, err := tea.NewProgram(a).Run()
-	a.reviews.CancelAll()
-	a.reviews.Wait()
+	final, err := tea.NewProgram(a).Run()
+	shutdown(final, a.reviews)
 	return err
+}
+
+// shutdown cancels the reviews still running and waits until they remove
+// their worktrees, unless the user forced the quit with a second ctrl+c.
+func shutdown(final tea.Model, r *Reviews) {
+	r.CancelAll()
+	if a, ok := final.(App); ok && a.forced {
+		return
+	}
+	r.Wait()
 }
 
 // Init starts what the first screen loads.
@@ -148,12 +158,13 @@ func (a App) Init() tea.Cmd {
 // help) becomes the question or the wait.
 func (a App) View() tea.View {
 	v := a.active().View()
+	const force = "  ctrl+c sale ya, sin esperar la limpieza"
 	n := a.reviews.Running()
 	switch {
 	case a.confirming:
-		v.Content = withStatus(v.Content, a.width, fmt.Sprintf("Hay %s en curso. ¿Salir igual? (s/n)", reviewsText(n)))
+		v.Content = withStatus(v.Content, a.width, fmt.Sprintf("Hay %s en curso. ¿Salir igual? (s/n)", reviewsText(n))+force)
 	case a.quitting:
-		v.Content = withStatus(v.Content, a.width, fmt.Sprintf("Cancelando %s en curso…", reviewsText(n)))
+		v.Content = withStatus(v.Content, a.width, fmt.Sprintf("Cancelando %s en curso…", reviewsText(n))+force)
 	}
 	v.AltScreen = true
 	return v

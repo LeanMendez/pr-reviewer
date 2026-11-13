@@ -143,7 +143,12 @@ func row88() listdata.Row {
 // listed opens the app on ws/stock with PRs 477 and 88 loaded.
 func listed(t *testing.T, h *apptest.Harness, n *notes) *driver {
 	t.Helper()
-	d := newDriver(t, NewApp(h.Deps, fakeSys(n), "ws/stock"))
+	return listedWith(t, h, fakeSys(n))
+}
+
+func listedWith(t *testing.T, h *apptest.Harness, s sys.System) *driver {
+	t.Helper()
+	d := newDriver(t, NewApp(h.Deps, s, "ws/stock"))
 	d.send(tea.WindowSizeMsg{Width: 120, Height: 40})
 	d.send(screens.RowsLoadedMsg{Ready: []listdata.Row{row477(), row88()}})
 	if v := d.view(); !strings.Contains(v, "CU-1 Pagos") {
@@ -489,5 +494,202 @@ func TestReviewCmd(t *testing.T) {
 	done = ReviewCmd(context.Background(), h.Deps, "ws/stock", row477(), pipeline.ModeLigero, make(chan pipeline.Event, 256))().(screens.ReviewDoneMsg)
 	if done.PR != 477 || done.Err == nil || !strings.Contains(done.Err.Error(), "sin red") {
 		t.Errorf("failure: %#v", done)
+	}
+}
+
+// blockUntilCancelled makes every agent wait for its review to be cancelled.
+func blockUntilCancelled(ctx context.Context, _ agent.Spec) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func agentStarted(msg tea.Msg) (int, bool) {
+	e, ok := msg.(reviewEventMsg)
+	return e.pr, ok && e.ev.Kind == pipeline.AgentStarted
+}
+
+func TestAppNotifyFailure(t *testing.T) {
+	h := harness(t)
+	release := make(chan struct{})
+	h.Agents.OnRun = func(ctx context.Context, _ agent.Spec) error {
+		select {
+		case <-release:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	s := fakeSys(&notes{})
+	s.Exec = func(context.Context, execx.Cmd) error { return errors.New("dbus\ncaído") }
+	d := listedWith(t, h, s)
+	d.send(screens.StartReviewMsg{Row: row477(), Mode: pipeline.ModeLigero})
+	d.send(screens.BackgroundMsg{PR: 477})
+	close(release)
+	d.until("the notification", is[notifiedMsg])
+	if v := d.view(); !strings.Contains(v, "No pude avisar: dbus caído") {
+		t.Errorf("a failed notification should show on the list:\n%s", v)
+	}
+}
+
+// TestAppModelsSaveKeepsConfigClean: saving the models writes back what the
+// user configured, not the cache dir pr-review derived.
+func TestAppModelsSaveKeepsConfigClean(t *testing.T) {
+	for _, c := range []struct{ name, file, want string }{
+		{"derived cache dir", "workspace: ws\n", ""},
+		{"the user's cache dir", "workspace: ws\ndirectorio_cache: /x/cache\n", "directorio_cache: /x/cache"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			cfgHome := t.TempDir()
+			t.Setenv("XDG_CONFIG_HOME", cfgHome)
+			t.Setenv("XDG_CACHE_HOME", t.TempDir())
+			p := filepath.Join(cfgHome, "pr-review", "config.yaml")
+			if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(p, []byte(c.file), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			deps, err := app.DefaultDeps()
+			if err != nil {
+				t.Fatal(err)
+			}
+			deps.Exec = execx.Fake(func(execx.Cmd) (string, string, int) { return "", "", 1 })
+			d := newDriver(t, NewModelsApp(deps, fakeSys(&notes{})))
+			d.key("g")
+			d.until("the save", is[screens.ModelsSavedMsg])
+			data, err := os.ReadFile(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch {
+			case c.want == "" && strings.Contains(string(data), "directorio_cache"):
+				t.Errorf("the derived cache dir was saved:\n%s", data)
+			case c.want != "" && !strings.Contains(string(data), c.want):
+				t.Errorf("the user's cache dir was lost:\n%s", data)
+			}
+		})
+	}
+}
+
+func TestAppForceQuit(t *testing.T) {
+	h := harness(t)
+	h.Agents.OnRun = blockUntilCancelled
+	d := listed(t, h, &notes{})
+	d.send(screens.StartReviewMsg{Row: row477(), Mode: pipeline.ModeLigero})
+	d.until("an agent", func(msg tea.Msg) bool { _, ok := agentStarted(msg); return ok })
+
+	d.send(screens.QuitMsg{})
+	if v := d.view(); !strings.Contains(v, "ctrl+c sale ya, sin esperar la limpieza") {
+		t.Errorf("the question should offer ctrl+c:\n%s", v)
+	}
+	if m, cmd := d.app.Update(tuitest.Key("ctrl+c")); cmd == nil || !is[tea.QuitMsg](cmd()) || !m.(App).forced {
+		t.Error("ctrl+c on the question should quit at once")
+	}
+
+	d.key("s")
+	if v := d.view(); !strings.Contains(v, "Cancelando 1 revisión en curso…") || !strings.Contains(v, "ctrl+c sale ya, sin esperar la limpieza") {
+		t.Errorf("the wait should offer ctrl+c:\n%s", v)
+	}
+	if m, cmd := d.app.Update(tuitest.Key("ctrl+c")); cmd == nil || !is[tea.QuitMsg](cmd()) || !m.(App).forced {
+		t.Error("ctrl+c while waiting should quit at once")
+	}
+}
+
+// TestShutdown: after the program ends, Run waits for the reviews to clean
+// up, unless the user forced the quit.
+func TestShutdown(t *testing.T) {
+	release := make(chan struct{})
+	r := newReviews(context.Background(), func(_ context.Context, _ listdata.Row, _ pipeline.Mode, events chan<- pipeline.Event) tea.Cmd {
+		return func() tea.Msg { <-release; close(events); return nil } // a slow cleanup
+	})
+	r.Start(row477(), pipeline.ModeLigero)
+
+	forced := make(chan struct{})
+	go func() { shutdown(App{reviews: r, forced: true}, r); close(forced) }()
+	select {
+	case <-forced:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a forced quit waited for the reviews")
+	}
+
+	normal := make(chan struct{})
+	go func() { shutdown(App{reviews: r}, r); close(normal) }()
+	select {
+	case <-normal:
+		t.Fatal("a normal end must wait for the reviews")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case <-normal:
+	case <-time.After(5 * time.Second):
+		t.Fatal("shutdown never returned")
+	}
+}
+
+func TestAppStaleReloadKeepsReviewed(t *testing.T) {
+	h := harness(t)
+	d := listed(t, h, &notes{})
+	d.send(screens.StartReviewMsg{Row: row477(), Mode: pipeline.ModeLigero})
+	d.until("the report", is[screens.OpenResultMsg])
+	d.send(screens.BackMsg{})
+	// A reload started before the review ended still says "never reviewed".
+	d.send(screens.RowsLoadedMsg{Ready: []listdata.Row{row477(), row88()}})
+	if v := d.view(); !strings.Contains(v, "lo revisó hace") || !strings.Contains(v, "o abrir el último reporte") {
+		t.Errorf("477 lost its review after a stale reload:\n%s", v)
+	}
+}
+
+func TestAppQuitTwoReviews(t *testing.T) {
+	h := harness(t)
+	h.Agents.OnRun = blockUntilCancelled
+	n := &notes{}
+	d := listed(t, h, n)
+	d.send(screens.StartReviewMsg{Row: row477(), Mode: pipeline.ModeLigero})
+	d.send(screens.BackgroundMsg{PR: 477})
+	d.send(screens.StartReviewMsg{Row: row88(), Mode: pipeline.ModeLigero})
+	started := map[int]bool{}
+	d.until("an agent of each review", func(msg tea.Msg) bool {
+		if pr, ok := agentStarted(msg); ok {
+			started[pr] = true
+		}
+		return len(started) == 2
+	})
+	if got := d.app.reviews.Running(); got != 2 {
+		t.Fatalf("Running() = %d, want 2", got)
+	}
+
+	d.send(screens.QuitMsg{})
+	if v := d.view(); !strings.Contains(v, "Hay 2 revisiones en curso. ¿Salir igual? (s/n)") {
+		t.Fatalf("no confirmation:\n%s", v)
+	}
+	if cmd := d.key("s"); cmd != nil {
+		t.Fatal("s must wait for both reviews")
+	}
+	if v := d.view(); !strings.Contains(v, "Cancelando 2 revisiones en curso…") {
+		t.Errorf("no cancelling status:\n%s", v)
+	}
+	ended := map[int]bool{}
+	d.until("both reviews to end", func(msg tea.Msg) bool {
+		if is[tea.QuitMsg](msg) {
+			t.Fatalf("quit with %d of 2 reviews ended", len(ended))
+		}
+		if done, ok := msg.(screens.ReviewDoneMsg); ok {
+			if !errors.Is(done.Err, context.Canceled) {
+				t.Errorf("#%d ended with %v, want it cancelled", done.PR, done.Err)
+			}
+			ended[done.PR] = true
+		}
+		return len(ended) == 2
+	})
+	if !ended[477] || !ended[88] {
+		t.Errorf("ended = %v, want 477 and 88", ended)
+	}
+	if got := h.Removed(); got != 4 {
+		t.Errorf("worktrees removed before quitting = %d, want 4", got)
+	}
+	d.until("quit", is[tea.QuitMsg])
+	if got := n.all(); len(got) != 0 {
+		t.Errorf("quitting notified: %q", got)
 	}
 }

@@ -6,10 +6,12 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// Key builds a Bubble Tea key press: up, down, left, right, enter, esc, or a
-// single letter. "backspace" is also accepted.
+// Key builds a Bubble Tea key press: up, down, left, right, enter, esc,
+// backspace, ctrl+c, or a single letter.
 func Key(name string) tea.Msg {
 	switch name {
+	case "ctrl+c":
+		return tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}
 	case "backspace":
 		return tea.KeyPressMsg{Code: tea.KeyBackspace}
 	case "up":

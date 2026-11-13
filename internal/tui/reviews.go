@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -52,6 +53,7 @@ type review struct {
 	events   chan pipeline.Event
 	progress screens.ProgressModel
 	done     *screens.ReviewDoneMsg // nil while it runs
+	doneAt   time.Time
 }
 
 // Reviews is the registry of the reviews started in this session, by PR
@@ -105,15 +107,25 @@ func (r *Reviews) running(pr int) bool {
 	return rv != nil && rv.done == nil
 }
 
-// finish records the end of a review and returns it; nil when msg is not
-// about a running review.
-func (r *Reviews) finish(msg screens.ReviewDoneMsg) *review {
+// finish records the end of a review at at and returns it; nil when msg is
+// not about a running review.
+func (r *Reviews) finish(msg screens.ReviewDoneMsg, at time.Time) *review {
 	rv := r.byPR[msg.PR]
 	if rv == nil || rv.done != nil {
 		return nil
 	}
-	rv.done = &msg
+	rv.done, rv.doneAt = &msg, at
 	return rv
+}
+
+// markSaved marks on list every review of this session that saved a report.
+func (r *Reviews) markSaved(list screens.ListModel) screens.ListModel {
+	for pr, rv := range r.byPR {
+		if rv.done != nil && rv.done.Dir != "" {
+			list = list.MarkReviewed(pr, rv.doneAt)
+		}
+	}
+	return list
 }
 
 // Running is how many reviews have not ended yet.
