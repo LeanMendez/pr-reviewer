@@ -29,7 +29,9 @@ var order = []Reason{
 }
 
 // Classify reports whether the PR is ready; if not, the first reason that applies.
-// A nil Tasks section counts as zero unresolved tasks.
+// A nil Tasks section counts as zero unresolved tasks. CI counts as passed
+// only for "pass" and "none" (no pipelines); any other or missing status is
+// unknown, never ready.
 func Classify(c prb.PRContext, me prb.Identity) (bool, Reason) {
 	if c.PullRequest.Draft {
 		return false, ReasonDraft
@@ -38,10 +40,13 @@ func Classify(c prb.PRContext, me prb.Identity) (bool, Reason) {
 		return false, ReasonCIUnknown
 	}
 	switch c.Checks.Overall {
+	case "pass", "none":
 	case "fail", "stopped":
 		return false, ReasonCIFailing
 	case "pending":
 		return false, ReasonCIPending
+	default:
+		return false, ReasonCIUnknown
 	}
 	if c.Tasks != nil && c.Tasks.Unresolved > 0 {
 		return false, ReasonTasks

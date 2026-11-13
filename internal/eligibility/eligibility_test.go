@@ -38,6 +38,9 @@ func TestClassify(t *testing.T) {
 		{"ci pending", pr(func(c *prb.PRContext) { c.Checks.Overall = "pending" }), me, false, ReasonCIPending},
 		{"ci nil", pr(func(c *prb.PRContext) { c.Checks = nil }), me, false, ReasonCIUnknown},
 		{"ci none es listo", pr(func(c *prb.PRContext) { c.Checks.Overall = "none" }), me, true, ""},
+		{"ci vacío", pr(func(c *prb.PRContext) { c.Checks.Overall = "" }), me, false, ReasonCIUnknown},
+		{"ci desconocido", pr(func(c *prb.PRContext) { c.Checks.Overall = "inprogress" }), me, false, ReasonCIUnknown},
+		{"ci en mayúsculas no se adivina", pr(func(c *prb.PRContext) { c.Checks.Overall = "PASS" }), me, false, ReasonCIUnknown},
 		{"tareas sin resolver", pr(func(c *prb.PRContext) { c.Tasks.Unresolved = 2 }), me, false, ReasonTasks},
 		{"tasks nil cuenta como 0", pr(func(c *prb.PRContext) { c.Tasks = nil }), me, true, ""},
 		{"cambios pedidos", pr(func(c *prb.PRContext) {
@@ -95,5 +98,36 @@ func TestHiddenLine(t *testing.T) {
 				t.Fatalf("got %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestClassifyPrecedence(t *testing.T) {
+	me := prb.Identity{User: "yo", AccountID: "acc-me"}
+	// Every reason applies; dropping them one by one, from the first, shows
+	// the order CI > tasks > changes > mine > approved.
+	all := func(c *prb.PRContext) {
+		c.Checks.Overall = "fail"
+		c.Tasks.Unresolved = 1
+		c.PullRequest.Author = "yo"
+		c.PullRequest.Review.Reviewers = []prb.Reviewer{
+			{AccountID: "x", State: "changes_requested"}, {AccountID: "acc-me", State: "approved"},
+		}
+	}
+	steps := []struct {
+		drop func(*prb.PRContext)
+		want Reason
+	}{
+		{func(*prb.PRContext) {}, ReasonCIFailing},
+		{func(c *prb.PRContext) { c.Checks.Overall = "pass" }, ReasonTasks},
+		{func(c *prb.PRContext) { c.Tasks.Unresolved = 0 }, ReasonChanges},
+		{func(c *prb.PRContext) { c.PullRequest.Review.Reviewers = c.PullRequest.Review.Reviewers[1:] }, ReasonMine},
+		{func(c *prb.PRContext) { c.PullRequest.Author = "otro" }, ReasonApproved},
+	}
+	c := pr(all)
+	for _, s := range steps {
+		s.drop(&c)
+		if ok, got := Classify(c, me); ok || got != s.want {
+			t.Fatalf("Classify = (%v, %q), want %q", ok, got, s.want)
+		}
 	}
 }
