@@ -1,23 +1,17 @@
 package cli
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"sync"
-	"time"
 
 	"github.com/spf13/cobra"
 
-	"github.com/LeanMendez/pr-review/internal/agent"
+	"github.com/LeanMendez/pr-review/internal/app"
 	"github.com/LeanMendez/pr-review/internal/finding"
 	"github.com/LeanMendez/pr-review/internal/pipeline"
-	"github.com/LeanMendez/pr-review/internal/prechecks"
-	"github.com/LeanMendez/pr-review/internal/prompts"
 	"github.com/LeanMendez/pr-review/internal/report"
 )
 
@@ -39,22 +33,7 @@ func ExitCode(v finding.Verdict) int {
 	return 1
 }
 
-// ResolveRepo returns the "workspace/repo" form of arg. A bare repo name takes
-// workspace, or BITBUCKET_WORKSPACE when workspace is empty.
-func ResolveRepo(arg, workspace string) (string, error) {
-	if strings.Contains(arg, "/") {
-		return arg, nil
-	}
-	if workspace == "" {
-		workspace = os.Getenv("BITBUCKET_WORKSPACE")
-	}
-	if workspace == "" {
-		return "", errors.New("Falta el workspace: configuralo con pr-review o pasá workspace/repo.")
-	}
-	return workspace + "/" + arg, nil
-}
-
-func newReviewCmd(deps func() (Deps, error)) *cobra.Command {
+func newReviewCmd(deps func() (app.Deps, error)) *cobra.Command {
 	var mode string
 	cmd := &cobra.Command{
 		Use:   "review <repo> <pr> --mode ligero|exhaustivo|judgment",
@@ -86,8 +65,8 @@ func newReviewCmd(deps func() (Deps, error)) *cobra.Command {
 	return cmd
 }
 
-func runReview(cmd *cobra.Command, d Deps, repoArg string, n int, mode pipeline.Mode) error {
-	ref, err := ResolveRepo(repoArg, d.Cfg.Workspace)
+func runReview(cmd *cobra.Command, d app.Deps, repoArg string, n int, mode pipeline.Mode) error {
+	ref, err := app.ResolveRepo(repoArg, d.Cfg.Workspace)
 	if err != nil {
 		return usageError(err)
 	}
@@ -100,10 +79,10 @@ func runReview(cmd *cobra.Command, d Deps, repoArg string, n int, mode pipeline.
 			printEvent(d.Err, ev)
 		}
 	}()
-	res, dir, err := Review(cmd.Context(), d, ref, n, mode, events)
+	res, dir, err := app.Review(cmd.Context(), d, ref, n, mode, events)
 	close(events)
 	printer.Wait()
-	var cleanupErr *CleanupError
+	var cleanupErr *app.CleanupError
 	if errors.As(err, &cleanupErr) {
 		fmt.Fprintln(d.Err, "aviso: no se pudieron borrar los worktrees:", cleanupErr.Err)
 		err = nil
@@ -125,87 +104,6 @@ func runReview(cmd *cobra.Command, d Deps, repoArg string, n int, mode pipeline.
 		return &exitError{Code: code}
 	}
 	return nil
-}
-
-// CleanupError is a review that finished, with its report written, whose
-// worktrees could not be removed: a warning, not a failed review.
-type CleanupError struct{ Err error }
-
-func (e *CleanupError) Error() string { return "no se pudieron borrar los worktrees: " + e.Err.Error() }
-
-func (e *CleanupError) Unwrap() error { return e.Err }
-
-// Review runs one review the way the review command does: the PR context
-// and its diff, the worktrees (removed on the way out), the pipeline and
-// the report. repo is "workspace/repo" or a bare name for the configured
-// workspace. The report dir is created private before any agent runs. It
-// prints nothing: progress goes to events (when not nil), which it never
-// closes. It returns the result and the report dir.
-//
-// When the review finished but the report could not be written, the result
-// and the dir come back with the error, so the caller can still show the
-// verdict. When only the worktree cleanup failed, the error is a
-// *CleanupError and the result and the report are complete.
-func Review(ctx context.Context, d Deps, repo string, n int, mode pipeline.Mode, events chan<- pipeline.Event) (res pipeline.Result, dir string, err error) {
-	ref, err := ResolveRepo(repo, d.Cfg.Workspace)
-	if err != nil {
-		return pipeline.Result{}, "", err
-	}
-	workspace, name, _ := strings.Cut(ref, "/")
-
-	now := d.Now
-	if now == nil {
-		now = time.Now
-	}
-	root := d.Cfg.ReportsDir
-	if root == "" {
-		root = report.ReportsRoot(d.Exec)
-	}
-	dir = report.Dir(root, name, n, now())
-
-	// The agents read the user's prompt overrides and log under the report.
-	prompts.SetOverrideDir(d.ConfigDir)
-	if r, ok := d.Agents.(agent.Runner); ok {
-		r.LogDir = filepath.Join(dir, "agentes")
-		d.Agents = r
-	}
-
-	pc, raw, err := d.PRB.Context(ctx, ref, n)
-	if err != nil {
-		return pipeline.Result{}, "", err
-	}
-	diff, err := d.PRB.Diff(ctx, ref, n, prechecks.ExcludeGlobs)
-	if err != nil {
-		return pipeline.Result{}, "", err
-	}
-	trees, cleanup, err := d.Cache.Prepare(ctx, workspace, name, pc.PullRequest)
-	if err != nil {
-		return pipeline.Result{}, "", err
-	}
-	defer func() {
-		switch cerr := cleanup(); {
-		case cerr == nil:
-		case err == nil:
-			err = &CleanupError{Err: cerr}
-		default:
-			err = errors.Join(err, fmt.Errorf("no se pudieron borrar los worktrees: %w", cerr))
-		}
-	}()
-
-	// The report dir is private before any agent logs into it.
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return pipeline.Result{}, "", fmt.Errorf("crear %s: %w", dir, err)
-	}
-	res, err = pipeline.Run(ctx, pipeline.Deps{Cfg: d.Cfg, Agents: d.Agents, Now: now},
-		pipeline.Request{Repo: ref, PR: pc, Diff: diff, Trees: trees, Mode: mode}, events)
-	if err != nil {
-		_ = os.Remove(dir) // only when empty: agent logs stay
-		return pipeline.Result{}, "", err
-	}
-	if err := report.Write(dir, res, raw, diff); err != nil {
-		return res, dir, err
-	}
-	return res, dir, nil
 }
 
 // printEvent writes one progress line per event.

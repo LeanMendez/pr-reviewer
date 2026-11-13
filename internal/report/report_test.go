@@ -506,3 +506,102 @@ func TestInlineNeutralizesMarkdown(t *testing.T) {
 		t.Errorf("a backslash before a backtick must not reopen a span:\n%s", md)
 	}
 }
+
+func mkReview(t *testing.T, root, repo, name string, withFindings bool) string {
+	t.Helper()
+	dir := filepath.Join(root, repo, name)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if withFindings {
+		if err := os.WriteFile(filepath.Join(dir, "findings.json"), []byte(`{"version":1}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+func TestLastReviewPicksNewest(t *testing.T) {
+	root := t.TempDir()
+	mkReview(t, root, "api", "pr-477-20261110-0900", true)
+	mkReview(t, root, "api", "pr-477-20261112-0412", true)
+	mkReview(t, root, "api", "pr-477-20261111-2359", true)
+	mkReview(t, root, "api", "pr-478-20261113-1000", true)
+	got, ok := LastReview(root, "api", 477)
+	want := time.Date(2026, 11, 12, 4, 12, 0, 0, time.Local)
+	if !ok || !got.Equal(want) {
+		t.Errorf("got %v, %v; want %v", got, ok, want)
+	}
+	if _, ok := LastReview(root, "api", 999); ok {
+		t.Error("PR without reviews must report false")
+	}
+	if _, ok := LastReview(root, "missing", 477); ok {
+		t.Error("missing repo dir must report false")
+	}
+}
+
+func TestLastReviewIgnoresDirWithoutFindings(t *testing.T) {
+	root := t.TempDir()
+	mkReview(t, root, "api", "pr-477-20261110-0900", true)
+	mkReview(t, root, "api", "pr-477-20261112-0412", false) // failed or cancelled run
+	got, ok := LastReview(root, "api", 477)
+	want := time.Date(2026, 11, 10, 9, 0, 0, 0, time.Local)
+	if !ok || !got.Equal(want) {
+		t.Errorf("got %v, %v; want %v", got, ok, want)
+	}
+	if _, err := os.Stat(filepath.Join(root, "api", "pr-477-20261112-0412")); err != nil {
+		t.Fatal(err)
+	}
+	root2 := t.TempDir()
+	mkReview(t, root2, "api", "pr-477-20261112-0412", false)
+	if _, ok := LastReview(root2, "api", 477); ok {
+		t.Error("dir without findings.json must not count as reviewed")
+	}
+	if _, _, err := LoadLatest(root2, "api", 477); err == nil {
+		t.Error("LoadLatest must not load a dir without findings.json")
+	}
+}
+
+func TestLastReviewIgnoresOtherPRsAndBadNames(t *testing.T) {
+	root := t.TempDir()
+	mkReview(t, root, "api", "pr-4770-20261112-0412", true)
+	mkReview(t, root, "api", "pr-477-latest", true)
+	mkReview(t, root, "api", "pr-477-20261112-0412-old", true)
+	mkReview(t, root, "api", "pr-477-20261340-9999", true)
+	if got, ok := LastReview(root, "api", 477); ok {
+		t.Errorf("matched %v", got)
+	}
+	if _, ok := LastReview(root, "api", 4770); !ok {
+		t.Error("pr 4770 must match its own dir")
+	}
+}
+
+func TestLoadLatestRoundTrip(t *testing.T) {
+	root := t.TempDir()
+	r := judgmentResult()
+	older := Dir(root, "api", r.PR.ID, time.Date(2026, 11, 10, 9, 0, 0, 0, time.Local))
+	newer := Dir(root, "api", r.PR.ID, time.Date(2026, 11, 12, 4, 12, 0, 0, time.Local))
+	old := r
+	old.Phrase = "vieja"
+	if err := Write(older, old, nil, prb.Diff{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Write(newer, r, nil, prb.Diff{}); err != nil {
+		t.Fatal(err)
+	}
+	got, md, err := LoadLatest(root, "api", r.PR.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if md != filepath.Join(newer, "review.md") {
+		t.Errorf("review.md path = %q", md)
+	}
+	want, _ := json.Marshal(r)
+	have, _ := json.Marshal(got)
+	if string(want) != string(have) {
+		t.Errorf("round trip differs:\nwant %s\ngot  %s", want, have)
+	}
+	if _, _, err := LoadLatest(root, "api", 1); err == nil {
+		t.Error("expected error when the PR has no review")
+	}
+}
