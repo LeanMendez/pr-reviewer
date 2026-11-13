@@ -29,14 +29,14 @@ func openUI(cmd *cobra.Command, args []string, deps func() (app.Deps, error), ui
 	}
 	var start tui.Start
 	if len(args) == 1 {
-		ref, err := app.ResolveRepo(args[0], d.Cfg.Workspace)
-		switch {
-		case err == nil:
-			start.Repo = ref
-		case d.ConfigFound:
+		switch ref, err := app.ResolveRepo(args[0], d.Cfg.Workspace); {
+		case !d.ConfigFound && !strings.Contains(args[0], "/"):
+			// The workspace the setup asks for wins over BITBUCKET_WORKSPACE.
+			start.Repo = args[0]
+		case err != nil:
 			return usageError(err)
 		default:
-			start.Repo = args[0]
+			start.Repo = ref
 		}
 	} else if dir, err := os.Getwd(); err == nil {
 		start.Repo, _ = DetectRepo(d.Exec, dir)

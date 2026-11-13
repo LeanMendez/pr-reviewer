@@ -74,6 +74,7 @@ func TestRootArgs(t *testing.T) {
 		args      []string
 		noConfig  bool
 		workspace string
+		env       string // BITBUCKET_WORKSPACE
 		origin    string
 		want      *tui.Start // nil: the interface must not open
 		code      int
@@ -82,6 +83,8 @@ func TestRootArgs(t *testing.T) {
 		{name: "workspace/repo", args: []string{"otro/stock"}, workspace: "ws", want: &tui.Start{Repo: "otro/stock"}},
 		{name: "a single unknown word is a repo", args: []string{"revisar"}, workspace: "ws", want: &tui.Start{Repo: "ws/revisar"}},
 		{name: "no config yet: the setup resolves it", args: []string{"stock"}, noConfig: true, want: &tui.Start{Repo: "stock"}},
+		{name: "no config yet: the setup's workspace wins over the env", args: []string{"stock"}, noConfig: true, env: "del-entorno", want: &tui.Start{Repo: "stock"}},
+		{name: "no config yet with workspace/repo", args: []string{"otro/stock"}, noConfig: true, env: "del-entorno", want: &tui.Start{Repo: "otro/stock"}},
 		{name: "config without workspace", args: []string{"stock"}, code: 2},
 		{name: "inside a Bitbucket checkout", workspace: "ws", origin: "git@bitbucket.org:equipo/api.git", want: &tui.Start{Repo: "equipo/api"}},
 		{name: "outside one: the picker", workspace: "ws", want: &tui.Start{}},
@@ -94,6 +97,7 @@ func TestRootArgs(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("BITBUCKET_WORKSPACE", c.env)
 			h := apptest.New(t)
 			h.Deps.ConfigFound = !c.noConfig
 			h.Deps.Cfg.Workspace = c.workspace

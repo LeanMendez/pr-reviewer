@@ -406,6 +406,8 @@ func TestAppOnboardingThenList(t *testing.T) {
 		return inner(ctx, c)
 	}
 	h.Deps.Exec, h.Deps.PRB.Exec = ex, ex
+	// The workspace typed in the setup wins over BITBUCKET_WORKSPACE.
+	t.Setenv("BITBUCKET_WORKSPACE", "del-entorno")
 	d := newDriver(t, NewApp(h.Deps, fakeSys(&notes{}), "stock"))
 	d.send(tea.WindowSizeMsg{Width: 120, Height: 40})
 	d.run(d.app.Init())
