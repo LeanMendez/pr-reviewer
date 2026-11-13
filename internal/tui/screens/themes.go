@@ -32,6 +32,7 @@ const (
 type ThemesModel struct {
 	themes        []theme.Theme
 	cursor        int
+	err           error // the chosen theme could not be saved; shown until the next key
 	width, height int
 }
 
@@ -47,6 +48,13 @@ func NewThemes(current string) ThemesModel {
 	return m
 }
 
+// WithSaveError says that saving the chosen theme failed with err, until the
+// next key.
+func (m ThemesModel) WithSaveError(err error) ThemesModel {
+	m.err = err
+	return m
+}
+
 // Init does nothing: the picker has nothing to load.
 func (m ThemesModel) Init() tea.Cmd { return nil }
 
@@ -56,6 +64,7 @@ func (m ThemesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 	case tea.KeyPressMsg:
+		m.err = nil
 		switch msg.String() {
 		case "ctrl+c":
 			return m, emit(QuitMsg{})
@@ -79,8 +88,12 @@ func (m ThemesModel) render(width, height int) string {
 	n := len(m.themes)
 	rows, previewH := n, 0
 	if height > 0 {
-		// Rows left for the list once the header, blank and help are placed.
+		// Rows left for the list once the header, blank, help and the save
+		// error (if any) are placed.
 		free := height - themesChrome
+		if m.err != nil {
+			free--
+		}
 		if ph := min(maxPreviewHeight, free-n-previewExtra); ph >= minPreviewHeight {
 			previewH = ph
 		} else {
@@ -93,6 +106,9 @@ func (m ThemesModel) render(width, height int) string {
 	lines := []string{" " + theme.Brand("pr-review") + "   " + theme.Dim.Render("configuración, tema"), ""}
 	for i := top; i < top+rows; i++ {
 		lines = append(lines, m.themeLine(i))
+	}
+	if m.err != nil {
+		lines = append(lines, theme.Accent.Render(" No se pudo guardar: "+clean(m.err.Error())))
 	}
 	switch {
 	case previewH > 0:

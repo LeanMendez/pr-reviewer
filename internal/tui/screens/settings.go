@@ -9,6 +9,9 @@ import (
 	"github.com/LeanMendez/pr-review/internal/tui/theme"
 )
 
+// OpenModelsMsg asks the router to open the models screen.
+type OpenModelsMsg struct{}
+
 // OpenThemesMsg asks the router to open the theme picker.
 type OpenThemesMsg struct{}
 

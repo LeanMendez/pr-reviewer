@@ -43,10 +43,12 @@ const (
 	scrProgress
 	scrReport
 	scrModels
+	scrSettings
+	scrThemes
 )
 
 // session is what the router and its reviews share. It changes when the
-// user finishes the setup, saves the models or picks a repo.
+// user finishes the setup, saves the models or a theme, or picks a repo.
 type session struct {
 	d    app.Deps
 	repo string // "workspace/repo"
@@ -80,6 +82,8 @@ type App struct {
 	mode       screens.ModeModel
 	report     screens.ReportModel
 	models     screens.ModelsModel
+	settings   screens.SettingsModel
+	themes     screens.ThemesModel
 	progressPR int // the review whose progress is shown
 
 	confirming bool // asking whether to quit with reviews running
@@ -244,6 +248,10 @@ func (a App) active() tea.Model {
 		return a.report
 	case scrModels:
 		return a.models
+	case scrSettings:
+		return a.settings
+	case scrThemes:
+		return a.themes
 	}
 	return a.list
 }

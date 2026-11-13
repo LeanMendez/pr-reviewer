@@ -251,7 +251,7 @@ func TestListKeys(t *testing.T) {
 	}
 
 	_, msg = send(m, tuitest.Key("m"))
-	if _, ok := msg.(OpenModelsMsg); !ok {
+	if _, ok := msg.(OpenSettingsMsg); !ok {
 		t.Errorf("m msg = %#v", msg)
 	}
 	_, msg = send(m, tuitest.Key("q"))
@@ -366,8 +366,14 @@ func TestListKeyHelpFits(t *testing.T) {
 			t.Errorf("width %d: key help cut:\n%s", w, out)
 		}
 	}
-	if out := tuitest.Plain(m.render(112, 30)); !strings.Contains(out, "m modelos") {
-		t.Errorf("m modelos missing at 112:\n%s", out)
+}
+
+func TestListKeyHelpSaysConfiguracion(t *testing.T) {
+	var calls int
+	m := loaded(t, &calls)
+	out := tuitest.Plain(m.render(112, 30))
+	if !strings.Contains(out, "m configuración") || strings.Contains(out, "m modelos") {
+		t.Errorf("the key help should say m configuración at 112:\n%s", out)
 	}
 }
 

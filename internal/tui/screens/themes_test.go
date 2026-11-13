@@ -1,6 +1,7 @@
 package screens
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -117,5 +118,24 @@ func TestThemesShortTerminal(t *testing.T) {
 	}
 	if !strings.Contains(plain, "agrandá la terminal para ver la vista previa") {
 		t.Errorf("missing small-terminal hint:\n%s", plain)
+	}
+}
+
+func TestThemesSaveError(t *testing.T) {
+	restoreTheme(t)
+	m := NewThemes("pr-review").WithSaveError(errors.New("disco\nlleno"))
+	for _, size := range []struct{ w, h int }{{100, 40}, {80, 12}} {
+		out := m.render(size.w, size.h)
+		plain := tuitest.Plain(out)
+		if !strings.Contains(plain, "No se pudo guardar: disco lleno") {
+			t.Errorf("%dx%d: save error missing:\n%s", size.w, size.h, plain)
+		}
+		if lines := strings.Split(out, "\n"); len(lines) > size.h || !strings.Contains(tuitest.Plain(lines[0]), "configuración, tema") {
+			t.Errorf("%dx%d: %d lines, header %q", size.w, size.h, len(lines), tuitest.Plain(lines[0]))
+		}
+	}
+	m, _ = pressThemes(m, "down")
+	if plain := tuitest.Plain(m.render(100, 40)); strings.Contains(plain, "No se pudo guardar") {
+		t.Errorf("the save error should go away with the next key:\n%s", plain)
 	}
 }

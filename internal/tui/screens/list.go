@@ -34,8 +34,8 @@ type OpenReportMsg struct {
 	PR   int
 }
 
-// OpenModelsMsg asks the router to open the models screen.
-type OpenModelsMsg struct{}
+// OpenSettingsMsg asks the router to open the settings menu.
+type OpenSettingsMsg struct{}
 
 // QuitMsg asks the router to leave the program.
 type QuitMsg struct{}
@@ -49,7 +49,7 @@ const (
 	minWidthAuthor = 100 // below this the author column goes away
 	minWidthBar    = 80  // below this the size bar goes away
 
-	minWidthModelsHelp = 112 // the key help only lists m when it fits
+	minWidthSettingsHelp = 112 // the key help only lists m when it fits
 )
 
 // ListModel is the PR list screen: a table of PRs ready for review and the
@@ -184,7 +184,7 @@ func (m ListModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.loading, m.err = true, nil
 		return m, m.startLoad()
 	case "m":
-		return m, emit(OpenModelsMsg{})
+		return m, emit(OpenSettingsMsg{})
 	case "q":
 		return m, emit(QuitMsg{})
 	}
@@ -314,8 +314,8 @@ func (m ListModel) keys(width int) []components.Key {
 		{Keys: "↑↓", Desc: "moverse"}, {Keys: "enter", Desc: "elegir modo"}, {Keys: "/", Desc: "filtrar"},
 		{Keys: "t", Desc: all}, {Keys: "r", Desc: "actualizar"},
 	}
-	if width >= minWidthModelsHelp {
-		ks = append(ks, components.Key{Keys: "m", Desc: "modelos"})
+	if width >= minWidthSettingsHelp {
+		ks = append(ks, components.Key{Keys: "m", Desc: "configuración"})
 	}
 	return append(ks, components.Key{Keys: "q", Desc: "salir"})
 }
