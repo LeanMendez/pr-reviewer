@@ -324,8 +324,11 @@ func TestResolveRepo(t *testing.T) {
 func TestReportDirPrivateBeforeAgents(t *testing.T) {
 	h := newHarness(t)
 	dir := filepath.Join(h.reports, "stock", "pr-477-20261112-1030")
+	var mu sync.Mutex // agents run in parallel
 	var mode os.FileMode
 	h.agents.onRun = func(agent.Spec) error {
+		mu.Lock()
+		defer mu.Unlock()
 		if st, err := os.Stat(dir); err == nil {
 			mode = st.Mode().Perm()
 		}
