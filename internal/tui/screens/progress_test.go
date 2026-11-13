@@ -3,6 +3,7 @@ package screens
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -86,10 +87,10 @@ func TestProgressAgents(t *testing.T) {
 	m, clk := newProgress(pipeline.ModeLigero, nil)
 	m = feed(m,
 		pipeline.Event{Kind: pipeline.StageStarted, Stage: pipeline.StageSpecialists},
-		pipeline.Event{Kind: pipeline.AgentStarted, Agent: "bugs", Role: config.RoleBugs, Model: config.ModelOpus},
-		pipeline.Event{Kind: pipeline.AgentStarted, Agent: "seguridad", Role: config.RoleSeguridad, Model: config.ModelSonnet})
+		pipeline.Event{Kind: pipeline.AgentStarted, Stage: pipeline.StageSpecialists, Agent: "bugs", Role: config.RoleBugs, Model: config.ModelOpus},
+		pipeline.Event{Kind: pipeline.AgentStarted, Stage: pipeline.StageSpecialists, Agent: "seguridad", Role: config.RoleSeguridad, Model: config.ModelSonnet})
 	clk.t = clk.t.Add(74 * time.Second)
-	m = feed(m, pipeline.Event{Kind: pipeline.AgentActivity, Agent: "bugs", Text: "leyendo src/a.go"})
+	m = feed(m, pipeline.Event{Kind: pipeline.AgentActivity, Stage: pipeline.StageSpecialists, Agent: "bugs", Text: "leyendo src/a.go"})
 	l := lineWith(plain(m), "bugs y lógica")
 	for _, w := range []string{"opus", "leyendo src/a.go", "1m 14s"} {
 		if !strings.Contains(l, w) {
@@ -97,8 +98,8 @@ func TestProgressAgents(t *testing.T) {
 		}
 	}
 	m = feed(m,
-		pipeline.Event{Kind: pipeline.AgentDone, Agent: "bugs", Candidates: 2},
-		pipeline.Event{Kind: pipeline.AgentFailed, Agent: "seguridad", Err: errors.New("se cortó")})
+		pipeline.Event{Kind: pipeline.AgentDone, Stage: pipeline.StageSpecialists, Agent: "bugs", Candidates: 2},
+		pipeline.Event{Kind: pipeline.AgentFailed, Stage: pipeline.StageSpecialists, Agent: "seguridad", Err: errors.New("se cortó")})
 	clk.t = clk.t.Add(time.Minute) // finished agents keep their time
 	out := plain(m)
 	l = lineWith(out, "bugs y lógica")
@@ -130,8 +131,8 @@ func TestProgressSanitizesAgentText(t *testing.T) {
 	m, _ := newProgress(pipeline.ModeLigero, nil)
 	m = feed(m,
 		pipeline.Event{Kind: pipeline.StageStarted, Stage: pipeline.StageSpecialists},
-		pipeline.Event{Kind: pipeline.AgentStarted, Agent: "bugs", Role: config.RoleBugs, Model: config.ModelOpus},
-		pipeline.Event{Kind: pipeline.AgentActivity, Agent: "bugs", Text: "leyendo \x1b[31mrojo\x1b]0;x\x07\nlargo " + strings.Repeat("x", 300)})
+		pipeline.Event{Kind: pipeline.AgentStarted, Stage: pipeline.StageSpecialists, Agent: "bugs", Role: config.RoleBugs, Model: config.ModelOpus},
+		pipeline.Event{Kind: pipeline.AgentActivity, Stage: pipeline.StageSpecialists, Agent: "bugs", Text: "leyendo \x1b[31mrojo\x1b]0;x\x07\nlargo " + strings.Repeat("x", 300)})
 	for _, l := range strings.Split(m.render(80, 0), "\n") {
 		if strings.ContainsAny(l, "\a\r") || strings.Count(l, "\x1b") != strings.Count(l, "\x1b[") {
 			t.Errorf("control chars leaked: %q", l)
@@ -155,8 +156,8 @@ func TestProgressHidesFindings(t *testing.T) {
 	m, _ := newProgress(pipeline.ModeLigero, nil)
 	m = feed(m,
 		pipeline.Event{Kind: pipeline.StageStarted, Stage: pipeline.StageSpecialists},
-		pipeline.Event{Kind: pipeline.AgentStarted, Agent: "bugs", Role: config.RoleBugs, Model: config.ModelOpus},
-		pipeline.Event{Kind: pipeline.AgentDone, Agent: "bugs", Candidates: 6})
+		pipeline.Event{Kind: pipeline.AgentStarted, Stage: pipeline.StageSpecialists, Agent: "bugs", Role: config.RoleBugs, Model: config.ModelOpus},
+		pipeline.Event{Kind: pipeline.AgentDone, Stage: pipeline.StageSpecialists, Agent: "bugs", Candidates: 6})
 	out := plain(m)
 	if !strings.Contains(out, "6 candidatos hasta ahora.") || !strings.Contains(out, "No se muestran hasta que pasen la validación") {
 		t.Errorf("hint missing:\n%s", out)
@@ -182,9 +183,9 @@ func TestProgressKeys(t *testing.T) {
 
 	m, _ = newProgress(pipeline.ModeLigero, nil)
 	m = feed(m, pipeline.Event{Kind: pipeline.StageStarted, Stage: pipeline.StageSpecialists},
-		pipeline.Event{Kind: pipeline.AgentStarted, Agent: "bugs", Role: config.RoleBugs, Model: config.ModelOpus})
+		pipeline.Event{Kind: pipeline.AgentStarted, Stage: pipeline.StageSpecialists, Agent: "bugs", Role: config.RoleBugs, Model: config.ModelOpus})
 	for i := 1; i <= 7; i++ {
-		m = feed(m, pipeline.Event{Kind: pipeline.AgentActivity, Agent: "bugs", Text: "paso " + string(rune('0'+i))})
+		m = feed(m, pipeline.Event{Kind: pipeline.AgentActivity, Stage: pipeline.StageSpecialists, Agent: "bugs", Text: "paso " + string(rune('0'+i))})
 	}
 	if strings.Contains(plain(m), "paso 3") {
 		t.Error("log hidden by default")
@@ -241,6 +242,108 @@ func TestRoleLabel(t *testing.T) {
 		config.RoleTests, config.RoleValidadorBugs, config.RoleValidadorReglas, config.RoleJuezA, config.RoleJuezB} {
 		if n, d := roleLabel(r); n == string(r) || d == "" {
 			t.Errorf("role %s has no label", r)
+		}
+	}
+}
+
+func validationWithAgents(n int) ProgressModel {
+	m, _ := newProgress(pipeline.ModeJudgment, nil)
+	m = feed(m,
+		pipeline.Event{Kind: pipeline.StageStarted, Stage: 1}, pipeline.Event{Kind: pipeline.StageDone, Stage: 1},
+		pipeline.Event{Kind: pipeline.StageStarted, Stage: pipeline.StageValidation, Candidates: n})
+	for i := 0; i < n; i++ {
+		name := fmt.Sprintf("validador_bugs-bugs-%03d", i)
+		m = feed(m, pipeline.Event{Kind: pipeline.AgentStarted, Stage: pipeline.StageValidation, Agent: name,
+			Role: config.RoleValidadorBugs, Model: config.ModelOpus})
+		if i%2 == 0 {
+			m = feed(m, pipeline.Event{Kind: pipeline.AgentDone, Stage: pipeline.StageValidation, Agent: name})
+		}
+	}
+	return m
+}
+
+func TestProgressFitsHeightKeepingStages(t *testing.T) {
+	for _, log := range []bool{false, true} {
+		m := validationWithAgents(20)
+		if log {
+			m, _ = press(m, "l")
+		}
+		for _, h := range []int{24, 16} {
+			out := tuitest.Plain(m.render(120, h))
+			lines := strings.Split(out, "\n")
+			if len(lines) > h {
+				t.Errorf("log=%v h=%d: %d lines exceed the height", log, h, len(lines))
+			}
+			must := []string{"pr-review", "#477"}
+			for _, s := range pipeline.Stages(pipeline.ModeJudgment) {
+				must = append(must, s.Name())
+			}
+			must = append(must, "candidatos hasta ahora", "cancelar", " más")
+			for _, w := range must {
+				if !strings.Contains(out, w) {
+					t.Errorf("log=%v h=%d: %q missing:\n%s", log, h, w, out)
+				}
+			}
+		}
+	}
+	// running agents win over finished ones when space is short
+	out := plain(validationWithAgents(20))
+	if !strings.Contains(tuitest.Plain(validationWithAgents(20).render(120, 24)), "bugs-001") {
+		t.Errorf("running validator must be listed first:\n%s", out)
+	}
+}
+
+func TestProgressCancelledShownForAnyErrorAfterC(t *testing.T) {
+	m, _ := newProgress(pipeline.ModeLigero, func() {})
+	m, _ = press(m, "c")
+	next, _ := m.Update(ReviewDoneMsg{Err: errors.New("signal: killed")})
+	out := tuitest.Plain(next.(ProgressModel).render(120, 0))
+	if !strings.Contains(out, "La revisión se canceló.") || strings.Contains(out, "killed") {
+		t.Errorf("got:\n%s", out)
+	}
+}
+
+func TestProgressAgentStageFromEvent(t *testing.T) {
+	m, _ := newProgress(pipeline.ModeLigero, nil)
+	m = feed(m,
+		pipeline.Event{Kind: pipeline.AgentStarted, Stage: pipeline.StageSpecialists, Agent: "bugs", Role: config.RoleBugs, Model: config.ModelOpus},
+		pipeline.Event{Kind: pipeline.StageStarted, Stage: pipeline.StageSpecialists},
+		pipeline.Event{Kind: pipeline.AgentDone, Stage: pipeline.StageSpecialists, Agent: "bugs", Candidates: 3})
+	out := plain(m)
+	if !strings.Contains(lineWith(out, "bugs y lógica"), "3 candidatos") || !strings.Contains(out, "3 candidatos hasta ahora.") {
+		t.Errorf("early agent lost:\n%s", out)
+	}
+	// a validator's Candidates are not added to the total
+	m = feed(m, pipeline.Event{Kind: pipeline.AgentDone, Stage: pipeline.StageValidation, Agent: "x", Candidates: 9})
+	if strings.Contains(plain(m), "12 candidatos") {
+		t.Error("only specialists add candidates")
+	}
+}
+
+func TestProgressStageNumbersAreFixed(t *testing.T) {
+	m, _ := newProgress(pipeline.ModeLigero, nil)
+	out := plain(m)
+	if l := lineWith(out, "Reporte"); !strings.HasPrefix(strings.TrimSpace(l), "7") {
+		t.Errorf("Reporte must be 7: %q", l)
+	}
+	if l := lineWith(out, "Validación"); !strings.HasPrefix(strings.TrimSpace(l), "5") {
+		t.Errorf("Validación must be 5: %q", l)
+	}
+	for _, l := range strings.Split(out, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(l), "6 ") {
+			t.Errorf("ligero has no stage 6: %q", l)
+		}
+	}
+	if !strings.Contains(out, "de 6 etapas") {
+		t.Errorf("footer counts the mode's stages:\n%s", out)
+	}
+}
+
+func TestProgressValidatorShowsCandidate(t *testing.T) {
+	out := tuitest.Plain(validationWithAgents(3).render(120, 0))
+	for _, w := range []string{"validador de bugs · bugs-000", "validador de bugs · bugs-002"} {
+		if !strings.Contains(out, w) {
+			t.Errorf("%q missing:\n%s", w, out)
 		}
 	}
 }

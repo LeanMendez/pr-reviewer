@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/LeanMendez/pr-review/internal/config"
 	"github.com/LeanMendez/pr-review/internal/pipeline"
@@ -36,7 +37,6 @@ type tickMsg struct{}
 const (
 	logLines   = 5
 	stageNameW = 26
-	roleW      = 18
 	modelW     = 9
 	elapsedW   = 7
 	candW      = 13
@@ -202,7 +202,7 @@ func (m *ProgressModel) apply(ev pipeline.Event) {
 		}
 	case pipeline.AgentStarted:
 		m.agents = append(m.agents, &agentState{
-			name: ev.Agent, stage: m.current, role: ev.Role, model: ev.Model, started: m.now(),
+			name: ev.Agent, stage: ev.Stage, role: ev.Role, model: ev.Model, started: m.now(),
 		})
 	case pipeline.AgentActivity:
 		if a := m.agent(ev.Agent); a != nil && !a.done {
@@ -215,7 +215,7 @@ func (m *ProgressModel) apply(ev pipeline.Event) {
 	case pipeline.AgentDone:
 		if a := m.agent(ev.Agent); a != nil {
 			a.done, a.finished, a.candidates = true, m.now(), ev.Candidates
-			if a.stage == pipeline.StageSpecialists {
+			if ev.Stage == pipeline.StageSpecialists {
 				m.candidates += ev.Candidates
 			}
 		}
@@ -250,14 +250,15 @@ func (m ProgressModel) render(width, height int) string {
 	}
 	stages := pipeline.Stages(m.mode)
 	doneCount := 0
-	for i, s := range stages {
+	agentAt := -1 // index in lines where the agent block goes
+	for _, s := range stages {
 		st := m.stages[s]
 		if st != nil && st.done {
 			doneCount++
 		}
-		lines = append(lines, m.stageLine(i+1, s, st, width))
+		lines = append(lines, m.stageLine(s, st, width))
 		if st != nil && !st.done && s == m.current {
-			lines = append(lines, m.agentLines(width)...)
+			agentAt = len(lines)
 		}
 	}
 	lines = append(lines, "")
@@ -266,7 +267,7 @@ func (m ProgressModel) render(width, height int) string {
 	switch {
 	case m.finished && m.err != nil:
 		msg := clean(m.err.Error())
-		if errors.Is(m.err, context.Canceled) {
+		if m.cancelling || errors.Is(m.err, context.Canceled) {
 			msg = "La revisión se canceló."
 		}
 		lines = append(lines, theme.Accent.Render("  "+msg), "",
@@ -275,6 +276,14 @@ func (m ProgressModel) render(width, height int) string {
 		lines = append(lines, theme.Accent.Render("  Cancelando…"))
 	default:
 		lines = append(lines, "  "+components.KeyHelp(m.keys()))
+	}
+	if agentAt >= 0 {
+		budget := 0 // 0 means no limit
+		if height > 0 {
+			budget = max(0, height-len(lines))
+		}
+		block := m.agentLines(width, budget, height > 0)
+		lines = append(lines[:agentAt], append(block, lines[agentAt:]...)...)
 	}
 	if height > 0 && len(lines) > height {
 		lines = lines[len(lines)-height:]
@@ -309,7 +318,7 @@ func (m ProgressModel) summary(done, total int) []string {
 	}
 }
 
-func (m ProgressModel) stageLine(n int, s pipeline.Stage, st *stageState, width int) string {
+func (m ProgressModel) stageLine(s pipeline.Stage, st *stageState, width int) string {
 	dw := 60
 	if width > 0 {
 		dw = max(10, width-stageNameW-elapsedW-9)
@@ -328,62 +337,116 @@ func (m ProgressModel) stageLine(n int, s pipeline.Stage, st *stageState, width 
 	if s == pipeline.StageValidation && st != nil && !st.done {
 		d = fmt.Sprintf("confirma o descarta cada candidato grave (%d)", m.candidates)
 	}
-	return "  " + theme.Dim.Render(fmt.Sprintf("%-3d", n)) + glyph + name.Render(pad(s.Name(), stageNameW)) +
+	return "  " + theme.Dim.Render(fmt.Sprintf("%-3d", int(s))) + glyph + name.Render(pad(s.Name(), stageNameW)) +
 		desc.Render(pad(d, dw)) + theme.Dim.Render(padLeft(elapsed, elapsedW))
 }
 
-func (m ProgressModel) agentLines(width int) []string {
+// agentLabel is the lowercase role name; a validator also names the candidate
+// it checks (its agent name is "<role>-<candidate id>").
+func agentLabel(a *agentState) string {
+	name, _ := roleLabel(a.role)
+	label := strings.ToLower(name)
+	if a.role == config.RoleValidadorBugs || a.role == config.RoleValidadorReglas {
+		if id := strings.TrimPrefix(clean(a.name), string(a.role)+"-"); id != "" && id != clean(a.name) {
+			label += " · " + id
+		}
+	}
+	return label
+}
+
+// agentLines renders the agents of the running stage in at most budget lines
+// (0 means no limit). Running agents come first; what does not fit becomes
+// a "y N más" line.
+func (m ProgressModel) agentLines(width, budget int, limited bool) []string {
+	var shown []*agentState
+	for _, a := range m.agents {
+		if a.stage == m.current && !a.done {
+			shown = append(shown, a)
+		}
+	}
+	for _, a := range m.agents {
+		if a.stage == m.current && a.done {
+			shown = append(shown, a)
+		}
+	}
+	roleCol := 18
+	for _, a := range shown {
+		roleCol = max(roleCol, min(34, ansi.StringWidth(agentLabel(a))+1))
+	}
+	specialists := m.current == pipeline.StageSpecialists
+	cw := 0
+	if specialists {
+		cw = candW + 3
+	}
 	aw := 40
 	if width > 0 {
-		aw = max(10, width-8-2-roleW-modelW-elapsedW-3-candW-1)
+		aw = max(10, width-8-2-roleCol-modelW-elapsedW-cw-1)
 	}
-	const indent = "        "
 	var out []string
-	for _, a := range m.agents {
-		if a.stage != m.current {
-			continue
-		}
-		glyph, activity, style := theme.Accent.Render("● "), a.activity, theme.Dim
-		end := m.now()
-		switch {
-		case a.failed:
-			glyph, style = theme.Accent.Render("✗ "), theme.Accent
-			activity = "falló"
-			if a.err != "" {
-				activity += ": " + a.err
+	for i, a := range shown {
+		entry := m.agentEntry(a, roleCol, aw, specialists)
+		if limited {
+			left := len(shown) - i - 1
+			need := len(entry)
+			if left > 0 {
+				need++ // room for the "y N más" line
 			}
-			end = a.finished
-		case a.done:
-			glyph, activity = theme.OK.Render("✓ "), "terminó"
-			end = a.finished
-		case activity == "":
-			activity = "arrancando"
+			if len(out)+need > budget {
+				if len(out)+1 <= budget {
+					out = append(out, theme.Dim.Render(fmt.Sprintf("        y %d más", len(shown)-i)))
+				}
+				return out
+			}
 		}
-		name, _ := roleLabel(a.role)
+		out = append(out, entry...)
+	}
+	return out
+}
+
+func (m ProgressModel) agentEntry(a *agentState, roleCol, aw int, specialists bool) []string {
+	const indent = "        "
+	glyph, activity, style := theme.Accent.Render("● "), a.activity, theme.Dim
+	end := m.now()
+	switch {
+	case a.failed:
+		glyph, style = theme.Accent.Render("✗ "), theme.Accent
+		activity = "falló"
+		if a.err != "" {
+			activity += ": " + a.err
+		}
+		end = a.finished
+	case a.done:
+		glyph, activity = theme.OK.Render("✓ "), "terminó"
+		end = a.finished
+	case activity == "":
+		activity = "arrancando"
+	}
+	line := indent + glyph +
+		theme.Text.Render(pad(agentLabel(a), roleCol)) +
+		theme.Ref.Render(pad(string(a.model), modelW)) +
+		style.Render(pad(activity, aw)) +
+		theme.Dim.Render(padLeft(fmtElapsed(end.Sub(a.started)), elapsedW))
+	if specialists {
 		cand := ""
-		if a.done && !a.failed && a.stage == pipeline.StageSpecialists {
-			cand = "0 candidatos"
+		if a.done && !a.failed {
 			switch a.candidates {
 			case 0:
+				cand = "0 candidatos"
 			case 1:
 				cand = "1 candidato"
 			default:
 				cand = fmt.Sprintf("%d candidatos", a.candidates)
 			}
 		}
-		out = append(out, indent+glyph+
-			theme.Text.Render(pad(strings.ToLower(name), roleW))+
-			theme.Ref.Render(pad(string(a.model), modelW))+
-			style.Render(pad(activity, aw))+
-			theme.Dim.Render(padLeft(fmtElapsed(end.Sub(a.started)), elapsedW))+"   "+
-			theme.Dim.Render(pad(cand, candW)))
-		if m.showLog {
-			if len(a.log) == 0 {
-				out = append(out, theme.Tick.Render(indent+"    (sin actividad registrada)"))
-			}
-			for _, l := range a.log {
-				out = append(out, theme.Dim.Render(indent+"    · "+l))
-			}
+		line += "   " + theme.Dim.Render(pad(cand, candW))
+	}
+	out := []string{line}
+	if m.showLog {
+		if len(a.log) == 0 {
+			out = append(out, theme.Tick.Render(indent+"    (sin actividad registrada)"))
+		}
+		for _, l := range a.log {
+			out = append(out, theme.Dim.Render(indent+"    · "+l))
 		}
 	}
 	return out
