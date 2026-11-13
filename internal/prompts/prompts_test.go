@@ -496,3 +496,13 @@ func TestValidatorGetsCandidate(t *testing.T) {
 		}
 	}
 }
+
+func TestJuezKnowsSomeFindingsAreUnconfirmed(t *testing.T) {
+	s := System(RoleJuez)
+	if strings.Contains(s, "ya pasaron la validación") {
+		t.Error("juez.md says every finding passed validation, but judges also get sin_confirmar ones")
+	}
+	if !strings.Contains(s, "sin_confirmar") {
+		t.Errorf("juez.md must say some findings arrive sin_confirmar:\n%s", s)
+	}
+}
