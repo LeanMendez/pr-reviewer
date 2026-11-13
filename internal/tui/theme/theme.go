@@ -17,10 +17,11 @@ import (
 )
 
 // Style tokens of the active theme. Every one carries the theme background.
-// Critical's color is reserved for the background of the "Crítico" label.
+// There is no style for the theme's Crit color: red is never used as text,
+// only as the background of the "Crítico" label (see SeverityLabel).
 var (
-	Text, Dim, OK, Accent, Ref, Critical, Tick lipgloss.Style
-	Strong                                     lipgloss.Style // bold
+	Text, Dim, OK, Accent, Ref, Tick lipgloss.Style
+	Strong                           lipgloss.Style // bold
 )
 
 var (
@@ -41,7 +42,7 @@ func Use(t Theme) {
 		return lipgloss.NewStyle().Foreground(lipgloss.Color(fg)).Background(bg)
 	}
 	Text, Dim, OK, Accent = style(t.Text), style(t.Dim), style(t.OK), style(t.Accent)
-	Ref, Critical, Tick = style(t.Ref), style(t.Crit), style(t.Tick)
+	Ref, Tick = style(t.Ref), style(t.Tick)
 	Strong = style(t.Strong).Bold(true)
 	label = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Label)).Background(lipgloss.Color(t.Crit))
 	r, g, b := parseHex(t.BG)

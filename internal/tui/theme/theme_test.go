@@ -40,7 +40,7 @@ func TestUseSwapsStyles(t *testing.T) {
 		fg    string
 	}{
 		"Text": {Text, th.Text}, "Dim": {Dim, th.Dim}, "OK": {OK, th.OK}, "Accent": {Accent, th.Accent},
-		"Ref": {Ref, th.Ref}, "Critical": {Critical, th.Crit}, "Tick": {Tick, th.Tick}, "Strong": {Strong, th.Strong},
+		"Ref": {Ref, th.Ref}, "Tick": {Tick, th.Tick}, "Strong": {Strong, th.Strong},
 	}
 	for name, tok := range tokens {
 		if c := tuitest.Cells(tok.style.Render("x")); len(c) != 1 || c[0].FG != tok.fg || c[0].BG != th.BG {
