@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"charm.land/bubbles/v2/viewport"
@@ -26,7 +28,11 @@ const (
 	maxReasonRunes = 200
 )
 
-type copiedMsg struct{ err error }
+// copiedMsg is the result of a copy; technical marks the copy for AI agents.
+type copiedMsg struct {
+	err       error
+	technical bool
+}
 type openedMsg struct{ err error }
 
 // item is one thing the cursor can stand on: a finding, or the row that
@@ -83,6 +89,8 @@ func (m ReportModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case copiedMsg:
 		switch {
+		case msg.err == nil && msg.technical:
+			m.note = "Copiado con contexto técnico."
 		case msg.err == nil:
 			m.note = "Copiado."
 		case errors.Is(msg.err, sys.ErrNoClipboard):
@@ -165,6 +173,25 @@ func (m ReportModel) key(msg tea.KeyPressMsg) (ReportModel, tea.Cmd) {
 		}
 		s, text := m.sys, report.CommentText(items[m.cursor].f)
 		return m, func() tea.Msg { return copiedMsg{err: s.Copy(context.Background(), text)} }
+	// shift+c, for developers and left out of the key help: the finding with
+	// technical context for an AI agent. Terminals report it as the text "C"
+	// or, without text, as "shift+c".
+	case "C", "shift+c":
+		if m.cursor >= len(items) || items[m.cursor].fold {
+			m.note = "Elegí un hallazgo para copiar."
+			break
+		}
+		s, res, f, saved := m.sys, m.res, items[m.cursor].f, m.savedAt
+		return m, func() tea.Msg {
+			// pr.diff sits next to review.md; without it the text has no fragment.
+			diff := ""
+			if saved != "" {
+				if b, err := os.ReadFile(filepath.Join(filepath.Dir(saved), "pr.diff")); err == nil {
+					diff = string(b)
+				}
+			}
+			return copiedMsg{err: s.Copy(context.Background(), report.AgentText(res, f, diff)), technical: true}
+		}
 	case "o":
 		url := strings.TrimSpace(m.res.PR.URL)
 		if url == "" {

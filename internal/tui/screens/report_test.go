@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -359,6 +361,42 @@ func TestReportKeys(t *testing.T) {
 		t.Fatal("ctrl+c returned no command")
 	} else if _, ok := cmd().(QuitMsg); !ok {
 		t.Errorf("ctrl+c did not emit QuitMsg")
+	}
+}
+
+// shift+c copies the finding with technical context for an AI agent; some
+// terminals report it as the text "C", others as "shift+c". It stays out of
+// the key help.
+func TestReportCopyTechnical(t *testing.T) {
+	dir := t.TempDir()
+	diff := "diff --git a/migraciones/0042_facturas.sql b/migraciones/0042_facturas.sql\n" +
+		"--- a/migraciones/0042_facturas.sql\n+++ b/migraciones/0042_facturas.sql\n@@ -15,3 +15,4 @@\n a\n+DROP COLUMN total;\n b\n"
+	if err := os.WriteFile(filepath.Join(dir, "pr.diff"), []byte(diff), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := reportResult()
+	for _, k := range []tea.KeyPressMsg{
+		{Code: 'c', Text: "C", Mod: tea.ModShift},
+		{Code: 'c', Mod: tea.ModShift},
+	} {
+		var calls []sysCall
+		m := NewReport(r, fakeSys(&calls, "xclip"), filepath.Join(dir, "review.md"))
+		n, cmd := m.Update(k)
+		m, _ = runCmd(n.(ReportModel), cmd)
+		want := report.AgentText(r, r.Findings[3], diff)
+		if len(calls) != 1 || calls[0].name != "xclip" || calls[0].stdin != want {
+			t.Fatalf("key %q: copy calls = %+v, want stdin %q", k.String(), calls, want)
+		}
+		if !strings.Contains(want, "+DROP COLUMN total;") {
+			t.Errorf("technical text lacks the diff fragment:\n%s", want)
+		}
+		if out := rplain(m); !strings.Contains(out, "Copiado con contexto técnico.") {
+			t.Errorf("key %q: no confirmation note:\n%s", k.String(), out)
+		}
+	}
+	m, _ := newReport(r, "xclip")
+	if out := rplain(m); strings.Contains(out, "shift+c") || strings.Contains(out, "técnico") {
+		t.Errorf("the technical copy must stay out of the help:\n%s", out)
 	}
 }
 
