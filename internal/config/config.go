@@ -32,7 +32,8 @@ type Config struct {
 	Concurrency   int                 `yaml:"concurrencia"`
 	AgentTimeout  time.Duration       `yaml:"-"` // (un)marshaled as a duration string, see below
 	ReportsDir    string              `yaml:"directorio_reportes"`
-	CacheDir      string              `yaml:"directorio_cache"`
+	CacheDir      string              `yaml:"directorio_cache,omitempty"` // empty: <XDG cache>/pr-review
+	Tema          string              `yaml:"tema,omitempty"`             // theme name, not validated here; empty: the default
 }
 
 // Defaults returns the default configuration.

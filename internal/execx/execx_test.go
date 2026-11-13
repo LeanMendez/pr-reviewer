@@ -102,3 +102,14 @@ func TestRealTimeoutWithGrandchildHoldingPipe(t *testing.T) {
 		t.Fatalf("Wait hung for %v", d)
 	}
 }
+
+func TestRealDetachDoesNotWaitForChildren(t *testing.T) {
+	start := time.Now()
+	err := Real()(context.Background(), Cmd{Name: "sh", Args: []string{"-c", "(sleep 3 &) ; exit 0"}, Detach: true})
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Errorf("Detach waited %v for a background child", d)
+	}
+}

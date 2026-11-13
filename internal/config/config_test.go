@@ -145,3 +145,35 @@ func TestLoadRejectsInvalidLimits(t *testing.T) {
 		t.Errorf("zero minor details is valid and keeps the other limits: %+v, %v", cfg.Thresholds, err)
 	}
 }
+
+func TestConfigTemaRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	cfg := Defaults()
+	cfg.Tema = "noir"
+	if err := Save(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	got, _, err := Load(path)
+	if err != nil || got.Tema != "noir" {
+		t.Fatalf("Tema = %q, err %v; want noir", got.Tema, err)
+	}
+
+	cfg.Tema = ""
+	if err := Save(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(path)
+	if strings.Contains(string(data), "tema") {
+		t.Errorf("empty tema was written:\n%s", data)
+	}
+	if got, _, err := Load(path); err != nil || got.Tema != "" {
+		t.Fatalf("without the field Tema = %q, err %v", got.Tema, err)
+	}
+
+	if err := os.WriteFile(path, []byte("tema: vaporwave\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, _, err := Load(path); err != nil || got.Tema != "vaporwave" {
+		t.Fatalf("unknown theme: Tema = %q, err %v", got.Tema, err)
+	}
+}

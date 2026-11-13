@@ -97,6 +97,10 @@ type Reviewer struct {
 // Checks summarizes build statuses (Overall: pass|fail|pending|stopped|none).
 type Checks struct {
 	Overall string `json:"overall"`
+	Passed  int    `json:"passed"`
+	Failed  int    `json:"failed"`
+	Pending int    `json:"pending"`
+	Stopped int    `json:"stopped"`
 }
 
 // Tasks counts PR tasks.

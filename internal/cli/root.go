@@ -9,6 +9,9 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+
+	"github.com/LeanMendez/pr-review/internal/app"
+	"github.com/LeanMendez/pr-review/internal/tui"
 )
 
 // version se pisa en el build con -ldflags si hace falta.
@@ -60,28 +63,30 @@ func handleError(err error, w io.Writer) int {
 	return exitCodeOf(err)
 }
 
-// NewRootCmd arma el comando raíz de pr-review con las dependencias reales.
-func NewRootCmd(version string) *cobra.Command { return newRootCmd(version, DefaultDeps) }
+// NewRootCmd arma el comando raíz de pr-review con las dependencias reales y
+// la interfaz de terminal.
+func NewRootCmd(version string) *cobra.Command { return newRootCmd(version, app.DefaultDeps, tui.Run) }
 
-func newRootCmd(version string, deps func() (Deps, error)) *cobra.Command {
+func newRootCmd(version string, deps func() (app.Deps, error), ui uiFunc) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:           "pr-review",
+		Use:           "pr-review [repo]",
 		Short:         "Revisa PRs de Bitbucket con varios agentes de Claude",
+		Long:          "Revisa PRs de Bitbucket con varios agentes de Claude.\n\nSin argumento abre la interfaz con el repo de Bitbucket de la copia actual o, si no hay, con un selector de repos.",
 		Version:       version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		// One word is a repo name; more is a typo'd subcommand with its args.
 		Args: func(_ *cobra.Command, args []string) error {
-			if len(args) > 0 {
-				return usageError(fmt.Errorf("comando desconocido %q", args[0]))
+			if len(args) > 1 {
+				return usageError(fmt.Errorf("comando desconocido %q; para abrir la interfaz: pr-review [repo]", args[0]))
 			}
 			return nil
 		},
-		// Runnable so Args validation applies to unknown subcommands.
-		RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
+		RunE: func(cmd *cobra.Command, args []string) error { return openUI(cmd, args, deps, ui) },
 	}
 	cmd.SetVersionTemplate("pr-review {{.Version}}\n")
 	cmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return usageError(err) })
-	cmd.AddCommand(newReviewCmd(deps))
+	cmd.AddCommand(newReviewCmd(deps), newConfigCmd(deps, ui))
 	return cmd
 }
 
