@@ -40,8 +40,7 @@ type RepoPickerModel struct {
 	err     error
 
 	cursor, top int
-	filter      string
-	filtering   bool
+	filter      filterInput
 
 	width, height int
 }
@@ -89,25 +88,8 @@ func (m RepoPickerModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if k == "ctrl+c" {
 		return m, emit(QuitMsg{})
 	}
-	if m.filtering {
-		switch k {
-		case "enter":
-			m.filtering = false
-		case "esc":
-			m.filtering, m.filter = false, ""
-		case "backspace":
-			if r := []rune(m.filter); len(r) > 0 {
-				m.filter = string(r[:len(r)-1])
-			}
-		case "up":
-			m.cursor--
-		case "down":
-			m.cursor++
-		default:
-			if msg.Text != "" {
-				m.filter += clean(msg.Text)
-			}
-		}
+	if m.filter.active {
+		m.cursor += m.filter.key(msg)
 		m.clamp()
 		return m, nil
 	}
@@ -122,7 +104,7 @@ func (m RepoPickerModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case "/":
 		if !m.loading && m.err == nil {
-			m.filtering = true
+			m.filter.start()
 		}
 	case "r":
 		m.loading, m.err = true, nil
@@ -143,13 +125,12 @@ func (m RepoPickerModel) fullName(r prb.Repo) string {
 }
 
 func (m RepoPickerModel) visible() []prb.Repo {
-	if m.filter == "" {
+	if m.filter.text == "" {
 		return m.repos
 	}
-	q := strings.ToLower(m.filter)
 	var out []prb.Repo
 	for _, r := range m.repos {
-		if strings.Contains(strings.ToLower(clean(r.Slug)), q) || strings.Contains(strings.ToLower(clean(r.Name)), q) {
+		if m.filter.matches(r.Slug) || m.filter.matches(r.Name) {
 			out = append(out, r)
 		}
 	}
@@ -251,7 +232,7 @@ func (m RepoPickerModel) body(height int) []string {
 			out = append(out, m.row(v[i], i == m.cursor))
 		}
 	}
-	if f := m.filterLine(); f != "" {
+	if f := m.filter.line(); f != "" {
 		out = append(out, f)
 	}
 	return out
@@ -269,19 +250,9 @@ func (m RepoPickerModel) row(r prb.Repo, selected bool) string {
 	return s
 }
 
-func (m RepoPickerModel) filterLine() string {
-	if m.filtering {
-		return theme.Strong.Render(" /") + theme.Text.Render(" "+m.filter) + theme.Accent.Render("▏")
-	}
-	if m.filter != "" {
-		return theme.Dim.Render(" filtro: ") + theme.Text.Render(m.filter)
-	}
-	return ""
-}
-
 func (m RepoPickerModel) keys() []components.Key {
 	switch {
-	case m.filtering:
+	case m.filter.active:
 		return []components.Key{{Keys: "enter", Desc: "aplicar"}, {Keys: "esc", Desc: "limpiar"}}
 	case m.loading:
 		return []components.Key{{Keys: "q", Desc: "salir"}}

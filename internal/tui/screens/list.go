@@ -65,8 +65,7 @@ type ListModel struct {
 
 	cursor, top int
 	showHidden  bool
-	filter      string
-	filtering   bool
+	filter      filterInput
 	threshold   int
 	note        string // shown until the next key
 
@@ -147,25 +146,8 @@ func (m ListModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if k == "ctrl+c" {
 		return m, emit(QuitMsg{})
 	}
-	if m.filtering {
-		switch k {
-		case "enter":
-			m.filtering = false
-		case "esc":
-			m.filtering, m.filter = false, ""
-		case "backspace":
-			if r := []rune(m.filter); len(r) > 0 {
-				m.filter = string(r[:len(r)-1])
-			}
-		case "up":
-			m.cursor--
-		case "down":
-			m.cursor++
-		default:
-			if msg.Text != "" {
-				m.filter += clean(msg.Text)
-			}
-		}
+	if m.filter.active {
+		m.cursor += m.filter.key(msg)
 		m.clamp()
 		return m, nil
 	}
@@ -184,7 +166,7 @@ func (m ListModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case "/":
 		if m.err == nil && !m.loading {
-			m.filtering = true
+			m.filter.start()
 		}
 	case "t":
 		m.showHidden = !m.showHidden
@@ -225,13 +207,8 @@ func (m ListModel) visible() []entry {
 }
 
 func (m ListModel) matches(r listdata.Row) bool {
-	if m.filter == "" {
-		return true
-	}
-	q := strings.ToLower(m.filter)
 	pr := r.Ctx.PullRequest
-	return strings.Contains(strings.ToLower(clean(pr.Title)), q) ||
-		strings.Contains(strings.ToLower(clean(pr.Author)), q)
+	return m.filter.matches(pr.Title) || m.filter.matches(pr.Author)
 }
 
 func (m ListModel) selected() (listdata.Row, bool) {
@@ -312,7 +289,7 @@ func (m ListModel) render(width, height int) string {
 
 func (m ListModel) keys(width int) []components.Key {
 	switch {
-	case m.filtering:
+	case m.filter.active:
 		return []components.Key{{Keys: "enter", Desc: "aplicar"}, {Keys: "esc", Desc: "limpiar"}}
 	case m.loading:
 		return []components.Key{{Keys: "q", Desc: "salir"}}
@@ -368,7 +345,7 @@ func (m ListModel) body(width, height int) []string {
 	var out []string
 	v := m.visible()
 	switch {
-	case len(v) == 0 && m.filter != "":
+	case len(v) == 0 && m.filter.text != "":
 		out = append(out, theme.Dim.Render(" Ningún PR coincide con el filtro."))
 	case len(v) == 0:
 		out = append(out, theme.Text.Render(" No hay PRs listos para revisar en "+clean(m.repo)+"."))
@@ -389,13 +366,7 @@ func (m ListModel) filterLine() string {
 	if m.note != "" {
 		return theme.Accent.Render(" " + m.note)
 	}
-	if m.filtering {
-		return theme.Strong.Render(" /") + theme.Text.Render(" "+m.filter) + theme.Accent.Render("▏")
-	}
-	if m.filter != "" {
-		return theme.Dim.Render(" filtro: ") + theme.Text.Render(m.filter)
-	}
-	return ""
+	return m.filter.line()
 }
 
 func (m ListModel) hiddenLine() string {
