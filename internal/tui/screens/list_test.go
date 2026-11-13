@@ -95,7 +95,7 @@ func TestListRender100(t *testing.T) {
 		"23 archivos, +690 −210.",
 		"Es grande: 900 líneas, más del doble de las 400 recomendadas.",
 		"Modo sugerido: exhaustivo.",
-		"↑↓ moverse", "enter elegir modo", "/ filtrar", "t ver todos", "r actualizar", "q salir",
+		"↑↓ moverse", "enter elegir modo", "/ filtrar", "t ver todos", "m configuración", "q salir", // r actualizar yields at 100,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
@@ -456,5 +456,43 @@ func TestListWithNote(t *testing.T) {
 	m = update(m, tuitest.Key("down"))
 	if out := tuitest.Plain(m.render(100, 30)); strings.Contains(out, "No pude abrir") {
 		t.Errorf("the note should go away on the next key:\n%s", out)
+	}
+}
+
+func TestListKeyHelpKeepsSettingsAndQuit(t *testing.T) {
+	var calls int
+	m := loaded(t, &calls)
+	for _, tc := range []struct {
+		width int
+		gone  []string
+	}{
+		{80, []string{"r actualizar", "t ver todos"}},
+		{100, []string{"r actualizar"}},
+		{112, nil},
+	} {
+		lines := strings.Split(tuitest.Plain(m.render(tc.width, 30)), "\n")
+		help := strings.TrimSpace(lines[len(lines)-1])
+		for _, want := range []string{"↑↓ moverse", "enter elegir modo", "m configuración", "q salir"} {
+			if !strings.Contains(help, want) {
+				t.Errorf("width %d: %q missing from %q", tc.width, want, help)
+			}
+		}
+		if strings.Contains(help, "…") {
+			t.Errorf("width %d: key help cut: %q", tc.width, help)
+		}
+		for _, gone := range tc.gone {
+			if strings.Contains(help, gone) {
+				t.Errorf("width %d: %q should have been dropped from %q", tc.width, gone, help)
+			}
+		}
+		for _, kept := range []string{"/ filtrar", "t ver todos", "r actualizar"} {
+			dropped := false
+			for _, g := range tc.gone {
+				dropped = dropped || g == kept
+			}
+			if !dropped && !strings.Contains(help, kept) {
+				t.Errorf("width %d: %q dropped too early from %q", tc.width, kept, help)
+			}
+		}
 	}
 }

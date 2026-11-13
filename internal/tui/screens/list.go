@@ -48,8 +48,6 @@ const (
 
 	minWidthAuthor = 100 // below this the author column goes away
 	minWidthBar    = 80  // below this the size bar goes away
-
-	minWidthSettingsHelp = 112 // the key help only lists m when it fits
 )
 
 // ListModel is the PR list screen: a table of PRs ready for review and the
@@ -312,12 +310,17 @@ func (m ListModel) keys(width int) []components.Key {
 	}
 	ks := []components.Key{
 		{Keys: "↑↓", Desc: "moverse"}, {Keys: "enter", Desc: "elegir modo"}, {Keys: "/", Desc: "filtrar"},
-		{Keys: "t", Desc: all}, {Keys: "r", Desc: "actualizar"},
+		{Keys: "t", Desc: all}, {Keys: "r", Desc: "actualizar"}, {Keys: "m", Desc: "configuración"}, {Keys: "q", Desc: "salir"},
 	}
-	if width >= minWidthSettingsHelp {
-		ks = append(ks, components.Key{Keys: "m", Desc: "configuración"})
+	// When the line is too long, drop the least important entries first: m
+	// and q always stay.
+	for _, drop := range []string{"r", "t", "/"} {
+		if width <= 0 || 1+ansi.StringWidth(components.KeyHelp(ks)) <= width {
+			break
+		}
+		ks = slices.DeleteFunc(ks, func(k components.Key) bool { return k.Keys == drop })
 	}
-	return append(ks, components.Key{Keys: "q", Desc: "salir"})
+	return ks
 }
 
 func (m ListModel) header(width int) string {
