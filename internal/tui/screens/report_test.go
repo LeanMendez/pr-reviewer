@@ -483,6 +483,8 @@ func TestReportScrollsToSelection(t *testing.T) {
 	}
 	m, _ := newReport(r)
 	const h = 14
+	n, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: h})
+	m = n.(ReportModel)
 	for i := 0; i < 7; i++ {
 		m, _ = rkey(m, "down")
 		out := m.render(100, h)
@@ -521,5 +523,53 @@ func TestReportCursorMarker(t *testing.T) {
 	m, _ = rkey(m, "down")
 	if l := mark(m); !strings.Contains(l, "src/x.go:5") { // alto goes before medio
 		t.Errorf("second marker on %q", l)
+	}
+}
+
+func page(m ReportModel, code rune) ReportModel {
+	n, _ := m.Update(tea.KeyPressMsg{Code: code})
+	return n.(ReportModel)
+}
+
+func tallReport() pipeline.Result {
+	r := reportResult()
+	r.Findings = nil
+	for i := 0; i < 8; i++ {
+		c := string(rune('a' + i))
+		r.Findings = append(r.Findings, rf("G"+c, "f"+c+".go", i+1, finding.SeverityMedio,
+			finding.OriginIntroducido, finding.StatusConfirmado, "Hallazgo número "+c+"."))
+	}
+	r.Gaps = []string{"el diff de a.go quedó cortado"}
+	r.Failures = []pipeline.Failure{{Agent: "bugs-1", Role: "bugs", Files: []string{"a.go"}, Reason: "boom"}}
+	return r
+}
+
+func TestReportPageKeysReachTheEnd(t *testing.T) {
+	m, _ := newReport(tallReport())
+	n, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 12})
+	m = n.(ReportModel)
+	view := func() string { return tuitest.Plain(m.render(100, 12)) }
+	for i := 0; i < 30; i++ {
+		m = page(m, tea.KeyPgDown)
+	}
+	out := view()
+	for _, want := range []string{"Guardado en", "No se pudo comprobar", "Bugs y lógica"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("pgdown never reached %q:\n%s", want, out)
+		}
+	}
+	for i := 0; i < 30; i++ {
+		m = page(m, tea.KeyPgUp)
+	}
+	if out := view(); !strings.Contains(out, "#477") {
+		t.Fatalf("pgup did not return to the top:\n%s", out)
+	}
+	// moving the cursor brings its item back into view
+	for i := 0; i < 30; i++ {
+		m = page(m, tea.KeyPgDown)
+	}
+	m, _ = rkey(m, "down")
+	if out := view(); !strings.Contains(out, "▌") {
+		t.Fatalf("cursor item not back in view after moving:\n%s", out)
 	}
 }

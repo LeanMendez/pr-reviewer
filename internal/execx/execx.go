@@ -22,6 +22,9 @@ type Cmd struct {
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
+	// Detach is for desktop tools that fork children (clipboard, browser):
+	// Stdout and Stderr go to /dev/null and nothing waits on inherited pipes.
+	Detach bool
 }
 
 // Exec runs a Cmd to completion.
@@ -46,6 +49,21 @@ func Real() Exec {
 		// A killed process whose grandchildren keep the pipes open must not hang Wait.
 		cmd.WaitDelay = waitDelay
 		cmd.Stdin = c.Stdin
+		if c.Detach {
+			// nil Stdout/Stderr mean /dev/null: no pipe for a forked child
+			// to keep open, so Wait returns as soon as the process exits.
+			if err := cmd.Run(); err != nil {
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return fmt.Errorf("%s: %w", c.Name, ctxErr)
+				}
+				var ee *exec.ExitError
+				if errors.As(err, &ee) {
+					return &ExitError{Code: ee.ExitCode()}
+				}
+				return fmt.Errorf("%s: %w", c.Name, err)
+			}
+			return nil
+		}
 		cmd.Stdout = c.Stdout
 		var captured bytes.Buffer
 		if c.Stderr != nil {

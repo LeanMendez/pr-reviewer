@@ -87,8 +87,24 @@ func (m ReportModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		m, cmd = m.key(msg)
 	}
-	m.follow()
+	if !pageKey(msg) {
+		m.follow()
+	}
 	return m, cmd
+}
+
+// pageKey reports whether msg only scrolls the window: the cursor stays
+// where it is, so it may leave the screen.
+func pageKey(msg tea.Msg) bool {
+	k, ok := msg.(tea.KeyPressMsg)
+	if !ok {
+		return false
+	}
+	switch k.String() {
+	case "pgup", "pgdown", "home", "end":
+		return true
+	}
+	return false
 }
 
 func (m ReportModel) items() []item {
@@ -110,7 +126,7 @@ func (m ReportModel) items() []item {
 func (m ReportModel) key(msg tea.KeyPressMsg) (ReportModel, tea.Cmd) {
 	m.note = ""
 	items := m.items()
-	page := max(1, m.height-4)
+	page := max(1, m.bodyHeight(m.height)-1)
 	switch msg.String() {
 	case "ctrl+c":
 		return m, emit(QuitMsg{})
@@ -121,9 +137,13 @@ func (m ReportModel) key(msg tea.KeyPressMsg) (ReportModel, tea.Cmd) {
 	case "down":
 		m.cursor = min(max(0, len(items)-1), m.cursor+1)
 	case "pgup":
-		m.top = max(0, m.top-page)
+		m.top = m.layout(m.width).clamp(m.top-page, m.bodyHeight(m.height))
 	case "pgdown":
-		m.top += page
+		m.top = m.layout(m.width).clamp(m.top+page, m.bodyHeight(m.height))
+	case "home":
+		m.top = 0
+	case "end":
+		m.top = m.layout(m.width).clamp(1<<30, m.bodyHeight(m.height))
 	case "enter":
 		if m.cursor < len(items) && items[m.cursor].fold {
 			m.expanded = !m.expanded
@@ -180,7 +200,7 @@ func (m ReportModel) render(width, height int) string {
 		vh := m.bodyHeight(height)
 		vp := viewport.New(viewport.WithWidth(max(1, width)), viewport.WithHeight(vh))
 		vp.SetContent(strings.Join(lay.lines, "\n"))
-		vp.SetYOffset(lay.scroll(m.top, m.cursor, vh))
+		vp.SetYOffset(lay.clamp(m.top, vh))
 		view := strings.Split(vp.View(), "\n")
 		for len(view) < vh {
 			view = append(view, "")
@@ -215,10 +235,15 @@ type layout struct {
 	start, end []int // per item, first and last line
 }
 
+// clamp keeps top inside the content for a window of vh lines.
+func (l layout) clamp(top, vh int) int {
+	return max(0, min(top, len(l.lines)-vh))
+}
+
 // scroll returns the top line that keeps item idx visible in a window of
 // vh lines, moving from top as little as possible.
 func (l layout) scroll(top, idx, vh int) int {
-	top = max(0, min(top, max(0, len(l.lines)-vh)))
+	top = l.clamp(top, vh)
 	if idx >= len(l.start) {
 		return top
 	}

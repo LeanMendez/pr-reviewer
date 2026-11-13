@@ -12,16 +12,18 @@ import (
 )
 
 type call struct {
-	name  string
-	args  []string
-	stdin string
+	name             string
+	args             []string
+	stdin            string
+	detach, deadline bool
 }
 
 func fakeSystem(available ...string) (System, *[]call) {
 	var calls []call
 	s := System{
-		Exec: func(_ context.Context, c execx.Cmd) error {
-			cl := call{name: c.Name, args: c.Args}
+		Exec: func(ctx context.Context, c execx.Cmd) error {
+			_, dl := ctx.Deadline()
+			cl := call{name: c.Name, args: c.Args, detach: c.Detach, deadline: dl}
 			if c.Stdin != nil {
 				b, _ := io.ReadAll(c.Stdin)
 				cl.stdin = string(b)
@@ -44,16 +46,16 @@ func TestSysCopyPicksFirstAvailable(t *testing.T) {
 		have []string
 		want call
 	}{
-		{[]string{"wl-copy", "xclip", "xsel"}, call{"wl-copy", nil, "hola"}},
-		{[]string{"xclip", "xsel"}, call{"xclip", []string{"-selection", "clipboard"}, "hola"}},
-		{[]string{"xsel"}, call{"xsel", []string{"--clipboard", "--input"}, "hola"}},
+		{[]string{"wl-copy", "xclip", "xsel"}, call{name: "wl-copy", args: nil, stdin: "hola"}},
+		{[]string{"xclip", "xsel"}, call{name: "xclip", args: []string{"-selection", "clipboard"}, stdin: "hola"}},
+		{[]string{"xsel"}, call{name: "xsel", args: []string{"--clipboard", "--input"}, stdin: "hola"}},
 	}
 	for _, c := range cases {
 		s, calls := fakeSystem(c.have...)
 		if err := s.Copy(context.Background(), "hola"); err != nil {
 			t.Fatalf("Copy with %v: %v", c.have, err)
 		}
-		if len(*calls) != 1 || (*calls)[0].name != c.want.name || !slices.Equal((*calls)[0].args, c.want.args) || (*calls)[0].stdin != "hola" {
+		if len(*calls) != 1 || (*calls)[0].name != c.want.name || !slices.Equal((*calls)[0].args, c.want.args) || (*calls)[0].stdin != "hola" || !(*calls)[0].detach || !(*calls)[0].deadline {
 			t.Errorf("Copy with %v ran %+v, want %+v", c.have, *calls, c.want)
 		}
 	}
@@ -83,7 +85,7 @@ func TestSysOpen(t *testing.T) {
 	if err := s.Open(context.Background(), "https://bitbucket.org/x"); err != nil {
 		t.Fatal(err)
 	}
-	if got := (*calls)[0]; got.name != "xdg-open" || !slices.Equal(got.args, []string{"https://bitbucket.org/x"}) {
+	if got := (*calls)[0]; got.name != "xdg-open" || !got.detach || !got.deadline || !slices.Equal(got.args, []string{"https://bitbucket.org/x"}) {
 		t.Errorf("Open ran %+v", got)
 	}
 }
@@ -93,7 +95,7 @@ func TestSysNotify(t *testing.T) {
 	if err := s.Notify(context.Background(), "Listo", "PR #1"); err != nil {
 		t.Fatal(err)
 	}
-	if got := (*calls)[0]; got.name != "notify-send" || !slices.Equal(got.args, []string{"--", "Listo", "PR #1"}) {
+	if got := (*calls)[0]; got.name != "notify-send" || !got.deadline || !slices.Equal(got.args, []string{"--", "Listo", "PR #1"}) {
 		t.Errorf("Notify ran %+v", got)
 	}
 }
@@ -105,5 +107,21 @@ func TestSysNotifyWithoutNotifySend(t *testing.T) {
 	}
 	if len(*calls) != 0 {
 		t.Errorf("nothing should run, got %+v", *calls)
+	}
+}
+
+func TestSysOpenOnlyHTTP(t *testing.T) {
+	for _, u := range []string{"file:///etc/passwd", "javascript:alert(1)", "-o/tmp/x", "--help", "", "ftp://x/y", "https:///nohost", "bitbucket.org/x"} {
+		s, calls := fakeSystem("xdg-open")
+		if err := s.Open(context.Background(), u); err == nil {
+			t.Errorf("Open(%q) succeeded", u)
+		}
+		if len(*calls) != 0 {
+			t.Errorf("Open(%q) ran %+v", u, *calls)
+		}
+	}
+	s, calls := fakeSystem("xdg-open")
+	if err := s.Open(context.Background(), "http://example.com/a?b=1"); err != nil || len(*calls) != 1 {
+		t.Errorf("http URL rejected: %v %+v", err, *calls)
 	}
 }
