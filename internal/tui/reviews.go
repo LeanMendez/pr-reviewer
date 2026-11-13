@@ -163,6 +163,21 @@ func (r *Reviews) CancelAll() {
 // Wait blocks until every review started has returned, worktrees removed.
 func (r *Reviews) Wait() { r.wg.Wait() }
 
+// WaitAtMost is Wait for at most d; it reports whether every review
+// returned in time.
+func (r *Reviews) WaitAtMost(d time.Duration) bool {
+	done := make(chan struct{})
+	go func() { r.wg.Wait(); close(done) }()
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-done:
+		return true
+	case <-t.C:
+		return false
+	}
+}
+
 // reviewEventMsg is an event read from the channel of the review of pr.
 type reviewEventMsg struct {
 	pr int

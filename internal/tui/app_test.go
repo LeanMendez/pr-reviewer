@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -600,35 +601,67 @@ func TestAppForceQuit(t *testing.T) {
 	}
 }
 
+// stopperCalls records what shutdown asks of the reviews.
+type stopperCalls []string
+
+func (c *stopperCalls) CancelAll() { *c = append(*c, "cancel") }
+func (c *stopperCalls) Wait()      { *c = append(*c, "wait") }
+func (c *stopperCalls) WaitAtMost(d time.Duration) bool {
+	*c = append(*c, "wait at most "+d.String())
+	return false
+}
+
 // TestShutdown: after the program ends, Run waits for the reviews to clean
-// up, unless the user forced the quit.
+// up; when the user forced the quit, only a bounded while, for their
+// processes to be killed.
 func TestShutdown(t *testing.T) {
+	var forced stopperCalls
+	shutdown(App{forced: true}, &forced)
+	if want := []string{"cancel", "wait at most 2s"}; !slices.Equal(forced, want) {
+		t.Errorf("forced quit: %q, want %q", forced, want)
+	}
+	var normal stopperCalls
+	shutdown(App{}, &normal)
+	if want := []string{"cancel", "wait"}; !slices.Equal(normal, want) {
+		t.Errorf("normal end: %q, want %q", normal, want)
+	}
+
 	release := make(chan struct{})
 	r := newReviews(context.Background(), func(_ context.Context, _ listdata.Row, _ pipeline.Mode, events chan<- pipeline.Event) tea.Cmd {
 		return func() tea.Msg { <-release; close(events); return nil } // a slow cleanup
 	})
 	r.Start(row477(), pipeline.ModeLigero)
-
-	forced := make(chan struct{})
-	go func() { shutdown(App{reviews: r, forced: true}, r); close(forced) }()
+	done := make(chan struct{})
+	go func() { shutdown(App{reviews: r}, r); close(done) }()
 	select {
-	case <-forced:
-	case <-time.After(5 * time.Second):
-		t.Fatal("a forced quit waited for the reviews")
-	}
-
-	normal := make(chan struct{})
-	go func() { shutdown(App{reviews: r}, r); close(normal) }()
-	select {
-	case <-normal:
+	case <-done:
 		t.Fatal("a normal end must wait for the reviews")
 	case <-time.After(100 * time.Millisecond):
 	}
 	close(release)
 	select {
-	case <-normal:
+	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("shutdown never returned")
+	}
+}
+
+func TestReviewsWaitAtMost(t *testing.T) {
+	release := make(chan struct{})
+	r := newReviews(context.Background(), func(_ context.Context, _ listdata.Row, _ pipeline.Mode, events chan<- pipeline.Event) tea.Cmd {
+		return func() tea.Msg { <-release; close(events); return nil }
+	})
+	r.Start(row477(), pipeline.ModeLigero)
+	start := time.Now()
+	if r.WaitAtMost(50 * time.Millisecond) {
+		t.Error("WaitAtMost reported the reviews ended while one still runs")
+	}
+	if d := time.Since(start); d < 50*time.Millisecond || d > 5*time.Second {
+		t.Errorf("WaitAtMost(50ms) took %v", d)
+	}
+	close(release)
+	if !r.WaitAtMost(5 * time.Second) {
+		t.Error("WaitAtMost gave up although the review ended")
 	}
 }
 

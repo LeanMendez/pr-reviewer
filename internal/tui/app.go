@@ -123,7 +123,7 @@ func newApp(ctx context.Context, d app.Deps, s sys.System, start Start) App {
 
 // Run opens the interface in the alternate screen and returns when the user
 // quits. Reviews still running then (a signal ended the program, or the
-// user forced the quit) are cancelled.
+// user forced the quit) are cancelled, and shutdown waits for them.
 func Run(ctx context.Context, d app.Deps, start Start) error {
 	a := newApp(ctx, d, sys.System{Exec: d.Exec, LookPath: exec.LookPath}, start)
 	final, err := tea.NewProgram(a).Run()
@@ -131,11 +131,25 @@ func Run(ctx context.Context, d app.Deps, start Start) error {
 	return err
 }
 
+// stopper is what shutdown needs of the reviews.
+type stopper interface {
+	CancelAll()
+	Wait()
+	WaitAtMost(time.Duration) bool
+}
+
+// forcedWait bounds the wait of a forced quit: time for the cancelled
+// reviews to have their claude and prb processes killed, not to remove
+// their worktrees.
+const forcedWait = 2 * time.Second
+
 // shutdown cancels the reviews still running and waits until they remove
-// their worktrees, unless the user forced the quit with a second ctrl+c.
-func shutdown(final tea.Model, r *Reviews) {
+// their worktrees. When the user forced the quit with a second ctrl+c, it
+// waits forcedWait at most.
+func shutdown(final tea.Model, r stopper) {
 	r.CancelAll()
 	if a, ok := final.(App); ok && a.forced {
+		r.WaitAtMost(forcedWait)
 		return
 	}
 	r.Wait()
