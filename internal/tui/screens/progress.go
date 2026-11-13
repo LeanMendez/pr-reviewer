@@ -458,7 +458,7 @@ func (m ProgressModel) agentEntry(a *agentState, roleCol, aw int, specialists bo
 	out := []string{line}
 	if m.showLog {
 		if len(a.log) == 0 {
-			out = append(out, theme.Tick.Render(indent+"    (sin actividad registrada)"))
+			out = append(out, theme.Dim.Render(indent+"    (sin actividad registrada)"))
 		}
 		for _, l := range a.log {
 			out = append(out, theme.Dim.Render(indent+"    · "+l))

@@ -392,3 +392,20 @@ func TestProgressPrbHint(t *testing.T) {
 		t.Errorf("other prb errors keep their text:\n%s", out)
 	}
 }
+
+func TestProgressEmptyLogIsDim(t *testing.T) {
+	m, _ := newProgress(pipeline.ModeLigero, nil)
+	m = feed(m,
+		pipeline.Event{Kind: pipeline.StageStarted, Stage: pipeline.StageSpecialists},
+		pipeline.Event{Kind: pipeline.AgentStarted, Stage: pipeline.StageSpecialists, Agent: "bugs", Role: config.RoleBugs, Model: config.ModelOpus})
+	m, _ = press(m, "l")
+	line := lineWith(m.render(120, 0), "sin actividad registrada")
+	if line == "" {
+		t.Fatal("no empty-log line")
+	}
+	for _, c := range tuitest.Cells(line) {
+		if strings.TrimSpace(c.Text) != "" && !strings.EqualFold(c.FG, theme.Current().Dim) {
+			t.Fatalf("cell %q fg %s, want Dim %s", c.Text, c.FG, theme.Current().Dim)
+		}
+	}
+}
