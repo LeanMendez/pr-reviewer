@@ -118,3 +118,30 @@ func TestLoadRejectsInvalidTaskIDPattern(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestLoadRejectsInvalidLimits(t *testing.T) {
+	for doc, key := range map[string]string{
+		"umbrales:\n  max_lineas: 0\n":            "max_lineas",
+		"umbrales:\n  max_archivos: -1\n":         "max_archivos",
+		"umbrales:\n  max_detalles_menores: -1\n": "max_detalles_menores",
+		"concurrencia: 0\n":                       "concurrencia",
+		"timeout_agente: 0s\n":                    "timeout_agente",
+		"timeout_agente: -5m\n":                   "timeout_agente",
+	} {
+		p := filepath.Join(t.TempDir(), "config.yaml")
+		if err := os.WriteFile(p, []byte(doc), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := Load(p); err == nil || !strings.Contains(err.Error(), key) {
+			t.Errorf("%q: err = %v, want one naming %s", doc, err, key)
+		}
+	}
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(p, []byte("umbrales:\n  max_detalles_menores: 0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := Load(p)
+	if err != nil || cfg.Thresholds.MaxMinorDetails != 0 || cfg.Thresholds.MaxLines != 400 {
+		t.Errorf("zero minor details is valid and keeps the other limits: %+v, %v", cfg.Thresholds, err)
+	}
+}

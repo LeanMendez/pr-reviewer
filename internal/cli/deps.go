@@ -41,13 +41,6 @@ func DefaultDeps() (Deps, error) {
 	if err != nil {
 		return Deps{}, err
 	}
-	def := config.Defaults()
-	if cfg.Concurrency <= 0 {
-		cfg.Concurrency = def.Concurrency
-	}
-	if cfg.AgentTimeout <= 0 {
-		cfg.AgentTimeout = def.AgentTimeout
-	}
 	if cfg.CacheDir == "" {
 		base, err := os.UserCacheDir()
 		if err != nil {

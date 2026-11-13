@@ -156,6 +156,7 @@ type run struct {
 	trivial  []string
 	jobs     []job
 	findings []finding.Finding
+	counted  []finding.Finding         // the findings as the minor cap found them, for the verdict
 	sources  map[string][]prb.DiffFile // finding ID → the patches it came from
 	doubts   []finding.Doubt
 	failed   []failure
@@ -220,7 +221,11 @@ func (r *run) review() (Result, error) {
 		res.Failures = append(res.Failures, f.Failure)
 	}
 	incomplete := len(r.failed) > 0 || len(r.pre.Unreviewed) > 0 || len(r.gaps) > 0
-	res.Verdict, res.IncompleteWarning = finding.ComputeVerdict(r.findings, incomplete)
+	counted := r.findings
+	if r.counted != nil {
+		counted = r.counted
+	}
+	res.Verdict, res.IncompleteWarning = finding.ComputeVerdict(counted, incomplete)
 	res.Phrase, res.Split = r.phrase, r.split
 	res.Findings, res.Doubts = r.findings, r.doubts
 	res.Excluded, res.Unreviewed, res.Gaps = r.pre.Excluded, r.pre.Unreviewed, r.gaps
@@ -691,8 +696,11 @@ type synthesisOut struct {
 }
 
 // Stage 7: the minor cap, then the synthesis. It writes the phrase and, only
-// for oversize PRs, the split; it never decides the verdict.
+// for oversize PRs, the split; it never decides the verdict. The cap only
+// decides which bajo findings review.md lists in detail, so the verdict
+// counts the findings as they were before it.
 func (r *run) synthesize() error {
+	r.counted = slices.Clone(r.findings)
 	r.capMinor()
 	in := r.input()
 	in.Findings = r.findings

@@ -1200,3 +1200,18 @@ func TestDiffGapsIgnoreExcludedFiles(t *testing.T) {
 		t.Errorf("verdict %s gaps %q unreviewed %v, want aprobar with no gaps", res.Verdict, res.Gaps, res.Unreviewed)
 	}
 }
+
+func TestVerdictIgnoresMinorCap(t *testing.T) {
+	fake := newFake(map[string]any{
+		prompts.RoleBugs: specialistReply(hallazgo("src/a.go", 3, finding.SeverityBajo, finding.GroupA, "menor")),
+	})
+	d := newDeps(fake)
+	d.Cfg.Thresholds.MaxMinorDetails = 0
+	res := mustRun(t, d, newRequest(t, ModeLigero))
+	if f := findingByID(t, res, "bugs-001"); f.Status != finding.StatusMenor {
+		t.Errorf("with no slots the bajo goes to the minor details, got %s", f.Status)
+	}
+	if res.Verdict != finding.VerdictAprobarConComentarios {
+		t.Errorf("verdict %s, want aprobar_con_comentarios: the cap only decides what is listed", res.Verdict)
+	}
+}

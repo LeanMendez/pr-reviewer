@@ -103,7 +103,32 @@ func Load(path string) (cfg Config, found bool, err error) {
 	if _, err := regexp.Compile(cfg.TaskIDPattern); err != nil {
 		return Defaults(), true, fmt.Errorf("patron_id_tarea inválido en %s: %w", path, err)
 	}
+	if err := cfg.checkLimits(path); err != nil {
+		return Defaults(), true, err
+	}
 	return cfg, true, nil
+}
+
+// checkLimits rejects limits that would silently turn a check off or stall
+// the reviews: size thresholds, parallel processes and the agent timeout
+// must be positive; the minor details cap may be 0.
+func (c Config) checkLimits(path string) error {
+	for _, l := range []struct {
+		key  string
+		bad  bool
+		want string
+	}{
+		{"umbrales.max_lineas", c.Thresholds.MaxLines <= 0, "mayor que 0"},
+		{"umbrales.max_archivos", c.Thresholds.MaxFiles <= 0, "mayor que 0"},
+		{"umbrales.max_detalles_menores", c.Thresholds.MaxMinorDetails < 0, "0 o más"},
+		{"concurrencia", c.Concurrency <= 0, "mayor que 0"},
+		{"timeout_agente", c.AgentTimeout <= 0, "mayor que 0"},
+	} {
+		if l.bad {
+			return fmt.Errorf("%s inválido en %s: tiene que ser %s", l.key, path, l.want)
+		}
+	}
+	return nil
 }
 
 // Save writes cfg atomically (temp file + rename) with mode 0600, creating
