@@ -49,7 +49,8 @@ type ReportModel struct {
 	expanded  bool // minor details unfolded
 	discarded bool // discarded list shown
 	note      string
-	top       int // first visible content line
+	top       int  // first visible content line
+	free      bool // the window moved away from the cursor: a resize keeps it there
 
 	width, height int
 }
@@ -76,6 +77,11 @@ func (m ReportModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		if m.free {
+			m.scrollBy(0)
+		} else {
+			m.follow()
+		}
 	case copiedMsg:
 		switch {
 		case msg.err == nil:
@@ -94,24 +100,7 @@ func (m ReportModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		m, cmd = m.key(msg)
 	}
-	if !pageKey(msg) {
-		m.follow()
-	}
 	return m, cmd
-}
-
-// pageKey reports whether msg only scrolls the window: the cursor stays
-// where it is, so it may leave the screen.
-func pageKey(msg tea.Msg) bool {
-	k, ok := msg.(tea.KeyPressMsg)
-	if !ok {
-		return false
-	}
-	switch k.String() {
-	case "pgup", "pgdown", "home", "end":
-		return true
-	}
-	return false
 }
 
 func (m ReportModel) items() []item {
@@ -139,24 +128,37 @@ func (m ReportModel) key(msg tea.KeyPressMsg) (ReportModel, tea.Cmd) {
 		return m, emit(QuitMsg{})
 	case "q":
 		return m, emit(BackMsg{})
+	// Past the first and the last item the arrows scroll the window, so
+	// what comes after the findings is reachable with them too.
 	case "up":
-		m.cursor = max(0, m.cursor-1)
+		if m.cursor > 0 {
+			m.cursor--
+			m.follow()
+		} else {
+			m.scrollBy(-1)
+		}
 	case "down":
-		m.cursor = min(max(0, len(items)-1), m.cursor+1)
+		if m.cursor < len(items)-1 {
+			m.cursor++
+			m.follow()
+		} else {
+			m.scrollBy(1)
+		}
 	case "pgup":
-		m.top = m.layout(m.width).clamp(m.top-page, m.bodyHeight(m.height))
+		m.scrollBy(-page)
 	case "pgdown":
-		m.top = m.layout(m.width).clamp(m.top+page, m.bodyHeight(m.height))
+		m.scrollBy(page)
 	case "home":
-		m.top = 0
+		m.scrollBy(-m.top)
 	case "end":
-		m.top = m.layout(m.width).clamp(1<<30, m.bodyHeight(m.height))
+		m.scrollBy(1 << 30)
 	case "enter":
 		if m.cursor < len(items) && items[m.cursor].fold {
 			m.expanded = !m.expanded
+			m.follow()
 		}
 	case "l":
-		m.discarded = !m.discarded
+		m.toggleDiscarded()
 	case "c":
 		if m.cursor >= len(items) || items[m.cursor].fold {
 			m.note = "Elegí un hallazgo para copiar."
@@ -176,14 +178,38 @@ func (m ReportModel) key(msg tea.KeyPressMsg) (ReportModel, tea.Cmd) {
 	return m, nil
 }
 
-// follow keeps the selected item inside the window.
+// follow keeps the selected item inside the window, now and on resizes.
 func (m *ReportModel) follow() {
+	m.free = false
 	if m.height <= 0 {
 		return
 	}
 	m.cursor = max(0, min(m.cursor, len(m.items())-1))
 	lay := m.layout(m.width)
 	m.top = lay.scroll(m.top, m.cursor, m.bodyHeight(m.height))
+}
+
+// scrollBy moves the window n lines, leaving the cursor where it is.
+func (m *ReportModel) scrollBy(n int) {
+	m.top = m.layout(m.width).clamp(m.top+n, m.bodyHeight(m.height))
+	m.free = true
+}
+
+// toggleDiscarded shows or hides the discarded candidates; shown, they come
+// into view. With none, a note says so.
+func (m *ReportModel) toggleDiscarded() {
+	if len(m.secs.Discarded) == 0 {
+		m.note = "Ningún candidato descartado."
+		return
+	}
+	m.discarded = !m.discarded
+	if !m.discarded {
+		m.scrollBy(0)
+		return
+	}
+	lay := m.layout(m.width)
+	m.top = lay.reveal(m.top, lay.disc[0], lay.disc[1], m.bodyHeight(m.height))
+	m.free = true
 }
 
 // View renders the screen at the last known size.
@@ -199,15 +225,17 @@ func (m ReportModel) bodyHeight(height int) int {
 
 func (m ReportModel) render(width, height int) string {
 	lay := m.layout(width)
-	keys := m.keyHelp(width)
+	more := false // content continues below the window
 	var out []string
 	if height <= 0 {
 		out = lay.lines
 	} else {
 		vh := m.bodyHeight(height)
+		top := lay.clamp(m.top, vh)
+		more = top+vh < len(lay.lines)
 		vp := viewport.New(viewport.WithWidth(max(1, width)), viewport.WithHeight(vh))
 		vp.SetContent(strings.Join(lay.lines, "\n"))
-		vp.SetYOffset(lay.clamp(m.top, vh))
+		vp.SetYOffset(top)
 		view := strings.Split(vp.View(), "\n")
 		for len(view) < vh {
 			view = append(view, "")
@@ -217,29 +245,39 @@ func (m ReportModel) render(width, height int) string {
 	if m.note != "" {
 		out = append(out[:len(out):len(out)], theme.Accent.Render("  "+m.note))
 	}
-	out = append(out[:len(out):len(out)], "  "+keys)
+	out = append(out[:len(out):len(out)], "  "+m.keyHelp(width, more))
 	for i, l := range out {
 		out[i] = fit(l, width)
 	}
 	return strings.Join(out, "\n")
 }
 
-// keyHelp lists the keys; on narrow terminals the descriptions are shorter.
-func (m ReportModel) keyHelp(width int) string {
-	copyD, openD, backD := "copiar hallazgo", "abrir en Bitbucket", "volver a la lista"
-	if width > 0 && width < 112 {
-		copyD, openD, backD = "copiar", "abrir", "volver"
+// keyHelp lists the keys, with pgdn while more content is below the window;
+// when they do not fit, the descriptions are shorter.
+func (m ReportModel) keyHelp(width int, more bool) string {
+	help := func(copyD, openD, backD string) string {
+		ks := []components.Key{{Keys: "↑↓", Desc: "moverse"}}
+		if more {
+			ks = append(ks, components.Key{Keys: "pgdn", Desc: "más abajo"})
+		}
+		return components.KeyHelp(append(ks,
+			components.Key{Keys: "enter", Desc: "expandir"}, components.Key{Keys: "c", Desc: copyD},
+			components.Key{Keys: "l", Desc: "descartados"}, components.Key{Keys: "o", Desc: openD},
+			components.Key{Keys: "q", Desc: backD}))
 	}
-	return components.KeyHelp([]components.Key{
-		{Keys: "↑↓", Desc: "moverse"}, {Keys: "enter", Desc: "expandir"}, {Keys: "c", Desc: copyD},
-		{Keys: "l", Desc: "descartados"}, {Keys: "o", Desc: openD}, {Keys: "q", Desc: backD},
-	})
+	long := help("copiar hallazgo", "abrir en Bitbucket", "volver a la lista")
+	if width > 0 && 2+ansi.StringWidth(long) > width {
+		return help("copiar", "abrir", "volver")
+	}
+	return long
 }
 
-// layout is the whole report as lines, plus where each item starts and ends.
+// layout is the whole report as lines, plus where each item starts and ends
+// and where the discarded list is.
 type layout struct {
 	lines      []string
-	start, end []int // per item, first and last line
+	start, end []int  // per item, first and last line
+	disc       [2]int // first and last line of the discarded list
 }
 
 // clamp keeps top inside the content for a window of vh lines.
@@ -250,18 +288,25 @@ func (l layout) clamp(top, vh int) int {
 // scroll returns the top line that keeps item idx visible in a window of
 // vh lines, moving from top as little as possible.
 func (l layout) scroll(top, idx, vh int) int {
-	top = l.clamp(top, vh)
 	if idx >= len(l.start) {
-		return top
+		return l.clamp(top, vh)
 	}
 	if idx == 0 {
 		return 0 // the header and verdict stay in view on the first item
 	}
-	if l.end[idx] >= top+vh {
-		top = l.end[idx] - vh + 1
+	return l.reveal(top, l.start[idx], l.end[idx], vh)
+}
+
+// reveal returns the top line that shows lines start..end in a window of vh
+// lines (start first when they do not fit), moving from top as little as
+// possible.
+func (l layout) reveal(top, start, end, vh int) int {
+	top = l.clamp(top, vh)
+	if end >= top+vh {
+		top = end - vh + 1
 	}
-	if l.start[idx] < top {
-		top = l.start[idx]
+	if start < top {
+		top = start
 	}
 	return top
 }
@@ -520,7 +565,9 @@ func (m ReportModel) layout(width int) layout {
 
 	add("")
 	rule()
-	add(m.footer(width)...)
+	foot, disc := m.footer(width)
+	lay.disc = [2]int{len(lay.lines), len(lay.lines) + max(0, disc-1)}
+	add(foot...)
 	return lay
 }
 
@@ -565,10 +612,10 @@ func (m ReportModel) findingLines(width int, gutter string, f finding.Finding) [
 	return out
 }
 
-// footer says what was not shown or not checked.
-func (m ReportModel) footer(width int) []string {
+// footer says what was not shown or not checked; disc is how many of its
+// first lines are the discarded list.
+func (m ReportModel) footer(width int) (out []string, disc int) {
 	r := m.res
-	var out []string
 	dim := func(s string) { out = append(out, flow(width, "  ", "  ", seg{theme.Dim, s})...) }
 	warn := func(prefix, s string) {
 		out = append(out, flow(width, prefix, strings.Repeat(" ", ansi.StringWidth(prefix)), seg{theme.Accent, s})...)
@@ -593,6 +640,7 @@ func (m ReportModel) footer(width int) []string {
 			out = append(out, rowLines(width, "    ", rows, theme.Ref, theme.Dim)...)
 		}
 	}
+	disc = len(out)
 	if len(r.Unreviewed) > 0 {
 		warn("  ", "Sin revisar: "+strings.Join(r.Unreviewed, ", ")+".")
 	}
@@ -623,7 +671,7 @@ func (m ReportModel) footer(width int) []string {
 	if m.savedAt != "" {
 		dim("Guardado en " + m.savedAt)
 	}
-	return out
+	return out, disc
 }
 
 // failureLines is one line per failed agent: role, what it covered and why

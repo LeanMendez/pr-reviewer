@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 	"unicode"
@@ -571,6 +572,120 @@ func TestReportPageKeysReachTheEnd(t *testing.T) {
 	m, _ = rkey(m, "down")
 	if out := view(); !strings.Contains(out, "▌") {
 		t.Fatalf("cursor item not back in view after moving:\n%s", out)
+	}
+}
+
+// sizedReport is the report of r on a w×h terminal.
+func sizedReport(r pipeline.Result, w, h int) ReportModel {
+	m, _ := newReport(r)
+	n, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
+	return n.(ReportModel)
+}
+
+// probeReport has six findings and, below them, everything the review could
+// not check: what the final review probed at 100x24.
+func probeReport() pipeline.Result {
+	r := reportResult()
+	for i, c := range []string{"x", "y", "z"} {
+		r.Findings = append(r.Findings, rf("H"+c, "src/"+c+".go", 10+i, finding.SeverityMedio,
+			finding.OriginIntroducido, finding.StatusConfirmado, "Otro hallazgo "+c+"."))
+	}
+	r.Gaps = []string{"el diff de a.go quedó cortado"}
+	r.Failures = []pipeline.Failure{{Agent: "bugs-1", Role: "bugs", Files: []string{"a.go"}, Reason: "boom"}}
+	return r
+}
+
+func lastLine(s string) string {
+	ls := strings.Split(s, "\n")
+	return ls[len(ls)-1]
+}
+
+func TestReportDownReachesTheTail(t *testing.T) {
+	const w, h = 100, 24
+	m := sizedReport(probeReport(), w, h)
+	tail := []string{"Dudas", "Sin revisar: package-lock.json", "No se pudo comprobar", "Agentes que fallaron", "Guardado en"}
+	seen := map[string]bool{}
+	var v string
+	for i := 0; i < 80; i++ {
+		m, _ = rkey(m, "down")
+		v = tuitest.Plain(m.render(w, h))
+		for _, s := range tail {
+			if strings.Contains(v, s) {
+				seen[s] = true
+			}
+		}
+	}
+	for _, s := range tail {
+		if !seen[s] {
+			t.Errorf("down never showed %q; last view:\n%s", s, v)
+		}
+	}
+}
+
+func TestReportUpOnTheFirstItemScrolls(t *testing.T) {
+	m := sizedReport(probeReport(), 100, 24)
+	m = page(m, tea.KeyPgDown)
+	m = page(m, tea.KeyPgDown)
+	top := m.top
+	m, _ = rkey(m, "up")
+	if m.cursor != 0 || m.top != top-1 {
+		t.Errorf("up on the first item: cursor %d top %d, want cursor 0 top %d", m.cursor, m.top, top-1)
+	}
+}
+
+func TestReportLShowsTheDiscarded(t *testing.T) {
+	m := sizedReport(probeReport(), 100, 24)
+	m, _ = rkey(m, "l")
+	v := tuitest.Plain(m.render(100, 24))
+	for _, want := range []string{"Descartados: 1 candidato", "Falso positivo grande.", "el validador no lo reprodujo"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("l must bring %q into view:\n%s", want, v)
+		}
+	}
+
+	// with nothing discarded, l says so instead of doing nothing
+	r := probeReport()
+	r.Findings = slices.DeleteFunc(r.Findings, func(f finding.Finding) bool { return f.Status == finding.StatusRefutado })
+	m = sizedReport(r, 100, 24)
+	m, _ = rkey(m, "l")
+	if v := tuitest.Plain(m.render(100, 24)); !strings.Contains(v, "Ningún candidato descartado.") {
+		t.Errorf("l without discarded candidates:\n%s", v)
+	}
+}
+
+func TestReportKeyHelpOffersPgdn(t *testing.T) {
+	m := sizedReport(probeReport(), 100, 24)
+	if l := lastLine(tuitest.Plain(m.render(100, 24))); !strings.Contains(l, "pgdn más abajo") || !strings.Contains(l, "q volver") {
+		t.Errorf("key help with more below: %q", l)
+	}
+	m = page(m, tea.KeyEnd)
+	if l := lastLine(tuitest.Plain(m.render(100, 24))); strings.Contains(l, "más abajo") || !strings.Contains(l, "q volver") {
+		t.Errorf("key help at the end: %q", l)
+	}
+	small := NewReport(pipeline.Result{PR: prb.PR{ID: 1, Title: "t"}, Verdict: finding.VerdictAprobar}, sys.System{}, "")
+	if l := lastLine(tuitest.Plain(small.render(100, 24))); strings.Contains(l, "pgdn") {
+		t.Errorf("key help of a report that fits: %q", l)
+	}
+}
+
+func TestReportResizeKeepsThePageScroll(t *testing.T) {
+	m := sizedReport(probeReport(), 100, 24)
+	for i := 0; i < 3; i++ {
+		m = page(m, tea.KeyPgDown)
+	}
+	top := m.top
+	n, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	m = n.(ReportModel)
+	n, _ = m.Update(copiedMsg{})
+	m = n.(ReportModel)
+	if m.top != top {
+		t.Errorf("a resize or a copy snapped the window back: top %d, want %d:\n%s", m.top, top, tuitest.Plain(m.render(100, 24)))
+	}
+	// moving the cursor again makes resizes follow it
+	m, _ = rkey(m, "down")
+	n, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 14})
+	if v := tuitest.Plain(n.(ReportModel).render(100, 14)); !strings.Contains(v, "▌") {
+		t.Errorf("after moving, a resize must keep the cursor in view:\n%s", v)
 	}
 }
 
