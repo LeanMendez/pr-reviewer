@@ -71,7 +71,8 @@ func (f *fakeAgents) Run(_ context.Context, s agent.Spec, _ func(agent.Activity)
 }
 
 const ctxJSON = `{"repository":"ws/stock","pull_request":{"id":477,"title":"CU-1 Pagos","state":"OPEN",
-"source":{"branch":"f","commit":"abc","repository":"ws/stock"},"destination":{"branch":"main","commit":"def","repository":"ws/stock"}}}`
+"source":{"branch":"f","commit":"abc","repository":"ws/stock"},"destination":{"branch":"main","commit":"def","repository":"ws/stock"}},
+"files":{"count":1,"lines_added":1,"lines_removed":0,"files":[{"path":"src/a.go","status":"modified","lines_added":1,"lines_removed":0}]}}`
 
 const diffJSON = `{"total_files":1,"files":[{"path":"src/a.go","status":"modified","lines_added":1,"lines_removed":0,
 "patch":"@@ -1,1 +1,2 @@\n x\n+y\n"}]}`

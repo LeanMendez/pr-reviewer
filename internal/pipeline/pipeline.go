@@ -65,6 +65,7 @@ type Result struct {
 	Split             []finding.SplitPart
 	Excluded          []string
 	Unreviewed        []string
+	Gaps              []string // what could not be checked beyond single files; any gap makes the review incomplete
 	RuleFiles         []rules.RuleFile
 	FailedAgents      []string
 	Failures          []Failure
@@ -90,6 +91,14 @@ const (
 	nameResumen  = "resumen"
 	namePlan     = "superior_plan"
 	nameSintesis = "superior_sintesis"
+)
+
+// Gaps of the diff as a whole: a PR context without its file list, or a
+// diff prb cut without saying where (a diff that brings fewer files than it
+// counts is a gap too, built with the numbers).
+const (
+	gapNoFileList = "prb no informó la lista de archivos del PR: no se pudo comprobar que el diff los trajera todos"
+	gapTruncated  = "prb marcó el diff como recortado sin decir qué archivos faltan"
 )
 
 // reasonFiltrado is the reason of a Group B finding the filter hides.
@@ -140,6 +149,7 @@ type run struct {
 	events chan<- Event
 
 	pre      prechecks.Result
+	gaps     []string
 	files    []prb.DiffFile // what the agents review: the diff minus the excluded files
 	rules    rules.RuleSet
 	summary  string
@@ -209,11 +219,11 @@ func (r *run) review() (Result, error) {
 		res.FailedAgents = append(res.FailedAgents, f.Agent)
 		res.Failures = append(res.Failures, f.Failure)
 	}
-	incomplete := len(r.failed) > 0 || len(r.pre.Unreviewed) > 0
+	incomplete := len(r.failed) > 0 || len(r.pre.Unreviewed) > 0 || len(r.gaps) > 0
 	res.Verdict, res.IncompleteWarning = finding.ComputeVerdict(r.findings, incomplete)
 	res.Phrase, res.Split = r.phrase, r.split
 	res.Findings, res.Doubts = r.findings, r.doubts
-	res.Excluded, res.Unreviewed = r.pre.Excluded, r.pre.Unreviewed
+	res.Excluded, res.Unreviewed, res.Gaps = r.pre.Excluded, r.pre.Unreviewed, r.gaps
 	res.RuleFiles = r.rules.Files
 	res.AgentCount = int(r.agents.Load())
 	res.Finished = r.d.Now()
@@ -223,24 +233,43 @@ func (r *run) review() (Result, error) {
 // Stage 1: deterministic checks. The diff comes without the generated files
 // (prb --exclude), so those, and the lockfile changes among them, are only
 // visible in the PR diffstat. A non-generated file of the diffstat that the
-// diff does not bring at all was never reviewed.
+// diff does not bring at all was never reviewed. When the diff as a whole
+// cannot be checked against the PR, that is a gap.
 func (r *run) prechecks() error {
-	pre := prechecks.Run(r.req.PR.PullRequest, r.req.Diff, r.d.Cfg)
+	d := r.req.Diff
+	pre := prechecks.Run(r.req.PR.PullRequest, d, r.d.Cfg)
+	brought := len(d.Files) + len(d.OmittedFiles)
+	inDiff := map[string]bool{}
+	for _, p := range slices.Concat(paths(d.Files), d.OmittedFiles) {
+		inDiff[p] = true
+	}
+	excludedAway := 0 // generated files of the PR that --exclude kept out of the diff
 	if fs := r.req.PR.Files; fs != nil {
 		stat := prechecks.Summarize(fs.Files, r.d.Cfg)
 		pre.Excluded = union(pre.Excluded, stat.Excluded)
 		pre.Sensitive = union(pre.Sensitive, stat.Sensitive)
-		inDiff := map[string]bool{}
-		for _, p := range slices.Concat(paths(r.req.Diff.Files), r.req.Diff.OmittedFiles) {
-			inDiff[p] = true
-		}
 		var missing []string
 		for _, f := range fs.Files {
-			if !inDiff[f.Path] && !prechecks.IsGenerated(f.Path) {
+			switch {
+			case inDiff[f.Path]:
+			case prechecks.IsGenerated(f.Path):
+				excludedAway++
+			default:
 				missing = append(missing, f.Path)
 			}
 		}
 		pre.Unreviewed = union(pre.Unreviewed, missing)
+	} else {
+		r.gaps = append(r.gaps, gapNoFileList)
+	}
+	if d.Truncated && len(d.OmittedFiles) == 0 &&
+		!slices.ContainsFunc(d.Files, func(f prb.DiffFile) bool { return prechecks.PatchGap(f) != "" }) {
+		r.gaps = append(r.gaps, gapTruncated)
+	}
+	// Whether prb's total counts the files --exclude dropped is not known,
+	// so the generated ones seen in the diffstat are allowed for.
+	if d.TotalFiles > brought+excludedAway {
+		r.gaps = append(r.gaps, fmt.Sprintf("el diff informa %d archivos y trajo %d", d.TotalFiles, brought))
 	}
 	excluded := map[string]bool{}
 	for _, p := range pre.Excluded {
@@ -717,16 +746,30 @@ func (r *run) capMinor() {
 }
 
 // incomplete lists what the review did not cover, one line each: the failed
-// agents and the non-generated files without a patch. Empty means complete.
+// agents, the non-generated files without their whole patch and the gaps of
+// the diff. Empty means complete.
 func (r *run) incomplete() []string {
 	var out []string
 	for _, f := range r.failed {
 		out = append(out, f.detail)
 	}
 	for _, p := range r.pre.Unreviewed {
-		out = append(out, fmt.Sprintf("%q quedó sin revisar: el diff no trajo su patch", p))
+		out = append(out, fmt.Sprintf("%q quedó sin revisar: %s", p, r.unreviewedReason(p)))
 	}
-	return out
+	return append(out, r.gaps...)
+}
+
+// unreviewedReason says why the file at p was not fully reviewed.
+func (r *run) unreviewedReason(p string) string {
+	for _, f := range r.req.Diff.Files {
+		if g := prechecks.PatchGap(f); f.Path == p && g != "" {
+			return g
+		}
+	}
+	if slices.Contains(r.req.Diff.OmittedFiles, p) {
+		return "el diff no trajo su patch"
+	}
+	return "el diff no lo trajo"
 }
 
 // call runs one agent and decodes its structured output. Any failure

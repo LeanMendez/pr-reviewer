@@ -105,7 +105,7 @@ func fallbackPhrase(r pipeline.Result) string {
 			counts[f.Severity]++
 		}
 	}
-	incomplete := len(r.Failures) > 0 || len(r.FailedAgents) > 0 || len(r.Unreviewed) > 0
+	incomplete := len(r.Failures) > 0 || len(r.FailedAgents) > 0 || len(r.Unreviewed) > 0 || len(r.Gaps) > 0
 	var lead string
 	switch n := counts[finding.SeverityCritico]; {
 	case n == 1:
@@ -266,6 +266,12 @@ func writeFooter(b *strings.Builder, r pipeline.Result, s sections) {
 		b.WriteString("\nSin revisar:\n\n")
 		for _, p := range r.Unreviewed {
 			fmt.Fprintf(b, "- %s\n", inline(oneLine(p)))
+		}
+	}
+	if len(r.Gaps) > 0 {
+		b.WriteString("\nNo se pudo comprobar que el diff esté completo:\n\n")
+		for _, g := range r.Gaps {
+			fmt.Fprintf(b, "- %s\n", inline(oneLine(g)))
 		}
 	}
 	if len(r.Excluded) > 0 {

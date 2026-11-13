@@ -304,7 +304,7 @@ func writePrechecks(b *strings.Builder, p prechecks.Result, withFindings bool) {
 	fmt.Fprintf(b, "Tamaño: %d líneas cambiadas; %s.\n", p.TotalLines, size)
 	writeList(b, "Cambios sensibles (config, CI, Docker, dependencias, migraciones o permisos)", p.Sensitive)
 	writeList(b, "Excluidos de la revisión (generados, lockfiles o binarios)", p.Excluded)
-	writeList(b, "Sin patch en el diff (si te tocan, leelos en head)", p.Unreviewed)
+	writeList(b, "Sin el patch completo en el diff (si te tocan, leelos en head)", p.Unreviewed)
 	if withFindings && len(p.Findings) > 0 {
 		b.WriteString("Ya reportado por los chequeos (no lo repitas):\n")
 		for _, f := range p.Findings {

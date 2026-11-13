@@ -435,3 +435,18 @@ func TestFallbackSaysIncomplete(t *testing.T) {
 		t.Errorf("failures: no incomplete note: %q", got)
 	}
 }
+
+func TestGapsShownAndIncomplete(t *testing.T) {
+	r := cleanResult()
+	r.Verdict = finding.VerdictRevisarAMano
+	r.Gaps = []string{"prb no informó la lista de archivos del PR"}
+	md := Markdown(r)
+	foot := md[strings.Index(md, "## Al pie"):]
+	if !strings.Contains(foot, "prb no informó la lista de archivos del PR") {
+		t.Errorf("gap missing from the footer:\n%s", foot)
+	}
+	r.Phrase = ""
+	if got := VerdictLine(r); !strings.Contains(got, "incompleta") {
+		t.Errorf("a gap must make the fallback say incomplete: %q", got)
+	}
+}

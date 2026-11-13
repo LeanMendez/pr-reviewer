@@ -2,6 +2,7 @@
 package prechecks
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"unicode"
@@ -35,9 +36,8 @@ func Run(pr prb.PR, d prb.Diff, cfg config.Config) Result {
 			files++
 			r.TotalLines += f.LinesAdded + f.LinesRemoved
 			r.Findings = append(r.Findings, scanSecrets(f)...)
-			if f.PatchOmitted {
+			if PatchGap(f) != "" {
 				r.Unreviewed = append(r.Unreviewed, f.Path)
-				seen[f.Path] = true
 			}
 		}
 		if IsSensitive(f.Path) {
@@ -83,6 +83,25 @@ func Summarize(files []prb.FileStat, cfg config.Config) Result {
 	}
 	r.Oversize = oversize(r.TotalLines, n, cfg)
 	return r
+}
+
+// PatchGap says why the diff does not carry f's whole patch, or "" when it
+// does: prb omitted or cut it, or sent it empty although lines changed. A
+// file with a gap was not fully reviewed. Binary files never have a patch.
+func PatchGap(f prb.DiffFile) string {
+	switch {
+	case f.Binary:
+		return ""
+	case f.PatchOmitted:
+		return "el diff no trajo su patch"
+	case f.OmittedLines > 0:
+		return fmt.Sprintf("patch recortado: faltan %d líneas", f.OmittedLines)
+	case f.Truncated:
+		return "patch recortado"
+	case f.Patch == "" && f.LinesAdded+f.LinesRemoved > 0:
+		return "patch vacío aunque cambió líneas"
+	}
+	return ""
 }
 
 func oversize(lines, files int, cfg config.Config) bool {

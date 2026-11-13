@@ -166,6 +166,48 @@ func TestExcludedAndUnreviewed(t *testing.T) {
 	}
 }
 
+func TestPartialPatchesAreUnreviewed(t *testing.T) {
+	d := prb.Diff{Files: []prb.DiffFile{
+		{Path: "src/trunc.go", Status: "modified", LinesAdded: 900, Truncated: true, OmittedLines: 850, Patch: patch("+x := 1")},
+		{Path: "src/cut.go", Status: "modified", LinesAdded: 40, OmittedLines: 12, Patch: patch("+y := 2")},
+		{Path: "src/empty.go", Status: "modified", LinesAdded: 3, LinesRemoved: 1},
+		{Path: "src/both.go", Status: "modified", LinesAdded: 900, Truncated: true, PatchOmitted: true},
+		{Path: "src/renamed.go", OldPath: "src/old.go", Status: "renamed"},
+		{Path: "assets/logo.png", Binary: true, LinesAdded: 0},
+		{Path: "src/ok.go", Status: "modified", LinesAdded: 1, Patch: patch("+z := 3")},
+	}}
+	r := Run(goodPR(), d, config.Defaults())
+	want := []string{"src/trunc.go", "src/cut.go", "src/empty.go", "src/both.go"}
+	if !reflect.DeepEqual(r.Unreviewed, want) {
+		t.Errorf("unreviewed = %v, want %v", r.Unreviewed, want)
+	}
+	for _, tc := range []struct {
+		f    prb.DiffFile
+		want string
+	}{
+		{d.Files[0], "patch recortado: faltan 850 líneas"},
+		{prb.DiffFile{Truncated: true, Patch: "x"}, "patch recortado"},
+		{d.Files[2], "patch vacío aunque cambió líneas"},
+		{d.Files[3], "el diff no trajo su patch"},
+		{d.Files[4], ""},
+		{d.Files[6], ""},
+	} {
+		if got := PatchGap(tc.f); got != tc.want {
+			t.Errorf("PatchGap(%s) = %q, want %q", tc.f.Path, got, tc.want)
+		}
+	}
+}
+
+func TestSecretsScannedInTruncatedPatch(t *testing.T) {
+	d := prb.Diff{Files: []prb.DiffFile{{
+		Path: "src/a.go", Status: "modified", LinesAdded: 900, Truncated: true, OmittedLines: 850,
+		Patch: patch(`+API_KEY = "abcd1234efgh"`),
+	}}}
+	if r := Run(goodPR(), d, config.Defaults()); len(r.Findings) != 1 {
+		t.Errorf("the visible part of a truncated patch must still be scanned: %+v", r.Findings)
+	}
+}
+
 func TestSummarizeFromFileStats(t *testing.T) {
 	stats := []prb.FileStat{
 		{Path: "src/a.go", LinesAdded: 300, LinesRemoved: 50},

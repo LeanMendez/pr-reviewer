@@ -167,11 +167,18 @@ func newRequest(t *testing.T, mode Mode, files ...prb.DiffFile) Request {
 	if files == nil {
 		files = []prb.DiffFile{patchFile("src/a.go", "cambio_en_a")}
 	}
+	// The PR context lists the same files as the diff, as prb does.
+	stats := &prb.Files{Count: len(files), Files: []prb.FileStat{}}
+	for _, f := range files {
+		stats.Files = append(stats.Files, prb.FileStat{
+			Path: f.Path, OldPath: f.OldPath, Status: f.Status, LinesAdded: f.LinesAdded, LinesRemoved: f.LinesRemoved,
+		})
+	}
 	return Request{
 		Repo: "stock",
 		PR: prb.PRContext{PullRequest: prb.PR{
 			ID: 7, Title: "CU-12 Agregar pagos", Description: "Agrega el endpoint de pagos.",
-		}},
+		}, Files: stats},
 		Diff:  prb.Diff{TotalFiles: len(files), Files: files},
 		Trees: repocache.Worktrees{Head: t.TempDir(), Base: t.TempDir()},
 		Mode:  mode,
@@ -1119,5 +1126,77 @@ func TestContextFilesMissingFromDiffAreUnreviewed(t *testing.T) {
 	}
 	if s := fake.byName(t, "superior_sintesis").Prompt; !strings.Contains(s, `"src/c.go" quedó sin revisar`) {
 		t.Errorf("the synthesis must name the file missing from the diff:\n%s", s)
+	}
+}
+
+func TestPartialDiffMakesIncomplete(t *testing.T) {
+	truncated := patchFile("src/a.go", "cambio_en_a")
+	truncated.Truncated, truncated.OmittedLines, truncated.LinesAdded = true, 850, 900
+	empty := prb.DiffFile{Path: "src/b.go", Status: "modified", LinesAdded: 3}
+	tests := []struct {
+		name       string
+		req        func(t *testing.T) Request
+		unreviewed []string
+		gap        string // a line of Result.Gaps, empty when none
+		line       string // a line of the synthesis' "Revisión incompleta"
+	}{
+		{"patch recortado", func(t *testing.T) Request { return newRequest(t, ModeLigero, truncated) },
+			[]string{"src/a.go"}, "", `"src/a.go" quedó sin revisar: patch recortado: faltan 850 líneas`},
+		{"patch vacío", func(t *testing.T) Request { return newRequest(t, ModeLigero, patchFile("src/a.go", "x"), empty) },
+			[]string{"src/b.go"}, "", `"src/b.go" quedó sin revisar: patch vacío aunque cambió líneas`},
+		{"contexto sin archivos", func(t *testing.T) Request {
+			req := newRequest(t, ModeLigero)
+			req.PR.Files = nil
+			return req
+		}, nil, gapNoFileList, gapNoFileList},
+		{"total_files mayor", func(t *testing.T) Request {
+			req := newRequest(t, ModeLigero)
+			req.Diff.TotalFiles = 3
+			return req
+		}, nil, "el diff informa 3 archivos y trajo 1", "el diff informa 3 archivos y trajo 1"},
+		{"diff recortado sin marca", func(t *testing.T) Request {
+			req := newRequest(t, ModeLigero)
+			req.Diff.Truncated = true
+			return req
+		}, nil, gapTruncated, gapTruncated},
+		{"diff recortado con el archivo marcado", func(t *testing.T) Request {
+			req := newRequest(t, ModeLigero, truncated)
+			req.Diff.Truncated = true
+			return req
+		}, []string{"src/a.go"}, "", `"src/a.go" quedó sin revisar`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := newFake(nil)
+			res := mustRun(t, newDeps(fake), tt.req(t))
+			if res.Verdict != finding.VerdictRevisarAMano {
+				t.Errorf("verdict %s, want revisar_a_mano", res.Verdict)
+			}
+			if !slices.Equal(res.Unreviewed, tt.unreviewed) {
+				t.Errorf("Unreviewed = %v, want %v", res.Unreviewed, tt.unreviewed)
+			}
+			if tt.gap == "" && len(res.Gaps) != 0 || tt.gap != "" && !slices.Contains(res.Gaps, tt.gap) {
+				t.Errorf("Gaps = %q, want %q", res.Gaps, tt.gap)
+			}
+			s := fake.byName(t, "superior_sintesis").Prompt
+			i := strings.Index(s, "# Revisión incompleta")
+			if i < 0 || !strings.Contains(s[i:], tt.line) {
+				t.Errorf("the synthesis must be told %q:\n%s", tt.line, s)
+			}
+		})
+	}
+}
+
+func TestDiffGapsIgnoreExcludedFiles(t *testing.T) {
+	// A truncated lockfile explains the diff's truncated flag, and a lockfile
+	// left out by --exclude may count in total_files: neither leaves code unread.
+	lock := prb.DiffFile{Path: "package-lock.json", Status: "modified", LinesAdded: 5000, Truncated: true, OmittedLines: 4000}
+	req := newRequest(t, ModeLigero, patchFile("src/a.go", "x"), lock)
+	req.Diff.Truncated = true
+	req.PR.Files.Files = append(req.PR.Files.Files, prb.FileStat{Path: "yarn.lock", LinesAdded: 10})
+	req.Diff.TotalFiles = 3
+	res := mustRun(t, newDeps(newFake(nil)), req)
+	if res.Verdict != finding.VerdictAprobar || len(res.Gaps) != 0 || len(res.Unreviewed) != 0 {
+		t.Errorf("verdict %s gaps %q unreviewed %v, want aprobar with no gaps", res.Verdict, res.Gaps, res.Unreviewed)
 	}
 }
