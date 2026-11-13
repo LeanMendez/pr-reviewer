@@ -59,12 +59,18 @@ func (s System) Open(ctx context.Context, rawURL string) error {
 	return s.Exec(ctx, execx.Cmd{Name: "xdg-open", Args: []string{rawURL}, Detach: true})
 }
 
+// markup escapes what notify-send would read as markup: PR titles and model
+// text reach the notification.
+var markup = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
+
 // Notify shows a desktop notification. Without notify-send it does nothing.
+// Title and body are plain text: markup characters are escaped.
 func (s System) Notify(ctx context.Context, title, body string) error {
 	if _, err := s.LookPath("notify-send"); err != nil {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	return s.Exec(ctx, execx.Cmd{Name: "notify-send", Args: []string{"--", title, body}, Detach: true})
+	args := []string{"--", markup.Replace(title), markup.Replace(body)}
+	return s.Exec(ctx, execx.Cmd{Name: "notify-send", Args: args, Detach: true})
 }

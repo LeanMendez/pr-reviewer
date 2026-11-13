@@ -100,6 +100,17 @@ func TestSysNotify(t *testing.T) {
 	}
 }
 
+func TestSysNotifyEscapesMarkup(t *testing.T) {
+	s, calls := fakeSystem("notify-send")
+	if err := s.Notify(context.Background(), "a<b>", `#7 listo: <a href="x">R&D</a>`); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"--", "a&lt;b&gt;", `#7 listo: &lt;a href="x"&gt;R&amp;D&lt;/a&gt;`}
+	if got := (*calls)[0].args; !slices.Equal(got, want) {
+		t.Errorf("Notify args = %q, want %q", got, want)
+	}
+}
+
 func TestSysNotifyWithoutNotifySend(t *testing.T) {
 	s, calls := fakeSystem()
 	if err := s.Notify(context.Background(), "a", "b"); err != nil {
