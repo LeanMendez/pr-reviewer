@@ -278,8 +278,11 @@ func (m ProgressModel) render(width, height int) string {
 	switch {
 	case m.finished && m.err != nil:
 		msg := clean(m.err.Error())
-		if m.cancelling || errors.Is(m.err, context.Canceled) {
+		switch {
+		case m.cancelling || errors.Is(m.err, context.Canceled):
 			msg = "La revisión se canceló."
+		case prbHint(m.err) != "":
+			msg = prbHint(m.err) + " y volvé a lanzar la revisión."
 		}
 		lines = append(lines, theme.Accent.Render("  "+msg), "",
 			"  "+components.KeyHelp([]components.Key{{Keys: "q", Desc: "volver a la lista"}}))
@@ -324,8 +327,9 @@ func (m ProgressModel) summary(done, total int) []string {
 	return []string{
 		theme.Text.Render(fmt.Sprintf("  %d %s hasta ahora. ", n, word)) +
 			theme.Dim.Render("No se muestran hasta que pasen la validación: muchos se van a caer."),
-		theme.Dim.Render(fmt.Sprintf("  Esta revisión usa %d agentes en total. Va %d de %d etapas.",
-			pipeline.EstimateAgents(m.mode), done, total)),
+		// The estimate is a floor: big PRs add agents.
+		theme.Dim.Render(fmt.Sprintf("  Esta revisión usa unos %d agentes en total. Va %d de %d etapas.",
+			max(pipeline.EstimateAgents(m.mode), len(m.agents)), done, total)),
 	}
 }
 

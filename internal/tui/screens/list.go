@@ -345,10 +345,19 @@ func (m ListModel) header(width int) string {
 	return left + strings.Repeat(" ", pad) + theme.Dim.Render(right)
 }
 
-func (m ListModel) errorLines() []string {
+// prbHint says what to do about a prb error with a known fix, without the
+// last step (each screen adds its own); "" for any other error.
+func prbHint(err error) string {
 	var pe *prb.Error
-	if errors.As(m.err, &pe) && pe.Code == "no_credentials" {
-		return []string{theme.Text.Render(" No hay sesión de Bitbucket. Corré prb auth login y apretá r.")}
+	if errors.As(err, &pe) && pe.Code == "no_credentials" {
+		return "No hay sesión de Bitbucket. Corré prb auth login"
+	}
+	return ""
+}
+
+func (m ListModel) errorLines() []string {
+	if hint := prbHint(m.err); hint != "" {
+		return []string{theme.Text.Render(" " + hint + " y apretá r.")}
 	}
 	return []string{
 		theme.Text.Render(" " + clean(m.err.Error())),

@@ -11,7 +11,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/LeanMendez/pr-review/internal/config"
 	"github.com/LeanMendez/pr-review/internal/finding"
 	"github.com/LeanMendez/pr-review/internal/pipeline"
 	"github.com/LeanMendez/pr-review/internal/report"
@@ -580,7 +579,8 @@ func (m ReportModel) findingLines(width int, gutter string, f finding.Finding) [
 		head += theme.Accent.Render("  sin validar")
 	case f.Status == finding.StatusSinConfirmar:
 		head += theme.Accent.Render("  sin confirmar")
-	case f.Origin == finding.OriginIncierto:
+	}
+	if f.Origin == finding.OriginIncierto {
 		head += theme.Accent.Render("  origen incierto")
 	}
 	out := []string{head}
@@ -674,15 +674,18 @@ func (m ReportModel) footer(width int) (out []string, disc int) {
 	return out, disc
 }
 
-// failureLines is one line per failed agent: role, what it covered and why
-// it failed. Agents named in FailedAgents without a Failure still show up.
+// failureLines is one line per failed agent: role, agent name, what it
+// covered and why it failed. Agents named in FailedAgents without a Failure
+// still show up.
 func (m ReportModel) failureLines() []string {
 	var lines []string
 	seen := map[string]bool{}
 	for _, f := range m.res.Failures {
 		seen[f.Agent] = true
-		name, _ := roleLabel(config.Role(f.Role))
-		l := name
+		l := promptRoleLabel(f.Role)
+		if a := clean(f.Agent); a != "" {
+			l += " (" + a + ")"
+		}
 		switch {
 		case len(f.Files) > 0:
 			l += ": " + strings.Join(f.Files, ", ")

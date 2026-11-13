@@ -360,3 +360,31 @@ func TestProgressWithoutChannel(t *testing.T) {
 		t.Errorf("event not applied:\n%s", out)
 	}
 }
+
+func TestProgressAgentCountIsAnEstimate(t *testing.T) {
+	m, _ := newProgress(pipeline.ModeLigero, nil)
+	est := pipeline.EstimateAgents(pipeline.ModeLigero)
+	if out := plain(m); !strings.Contains(out, fmt.Sprintf("Esta revisión usa unos %d agentes en total.", est)) {
+		t.Errorf("the estimate must read as one:\n%s", out)
+	}
+	// more agents than estimated: the count follows the ones started
+	for i := 0; i < est+2; i++ {
+		m = feed(m, pipeline.Event{Kind: pipeline.AgentStarted, Stage: pipeline.StageSpecialists,
+			Agent: fmt.Sprintf("bugs-%d", i+1), Role: config.RoleBugs, Model: config.ModelOpus})
+	}
+	if out := plain(m); !strings.Contains(out, fmt.Sprintf("Esta revisión usa unos %d agentes en total.", est+2)) {
+		t.Errorf("more agents than estimated:\n%s", out)
+	}
+}
+
+func TestProgressPrbHint(t *testing.T) {
+	m, _ := newProgress(pipeline.ModeLigero, nil)
+	n, _ := m.Update(ReviewDoneMsg{PR: 477, Err: &prb.Error{Code: "no_credentials", Message: "missing token"}})
+	if out := plain(n.(ProgressModel)); !strings.Contains(out, "No hay sesión de Bitbucket. Corré prb auth login") {
+		t.Errorf("a prb session error needs the same hint as the list:\n%s", out)
+	}
+	n, _ = m.Update(ReviewDoneMsg{PR: 477, Err: &prb.Error{Code: "rate_limited", Message: "demasiados pedidos"}})
+	if out := plain(n.(ProgressModel)); !strings.Contains(out, "demasiados pedidos") {
+		t.Errorf("other prb errors keep their text:\n%s", out)
+	}
+}

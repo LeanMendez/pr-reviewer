@@ -418,6 +418,47 @@ func TestReportFooterShowsGapsAndFailures(t *testing.T) {
 	}
 }
 
+func TestReportShowsBothMarks(t *testing.T) {
+	r := reportResult()
+	r.Findings = append(r.Findings,
+		rf("F9", "g.go", 7, finding.SeverityAlto, finding.OriginIncierto, finding.StatusSinConfirmar, "Dudoso por partida doble."),
+		rf("F10", "h.go", 8, finding.SeverityAlto, finding.OriginIncierto, finding.StatusCandidato, "Sin pasar y de origen dudoso."))
+	m, _ := newReport(r)
+	out := rplain(m)
+	if l := lineWith(out, "g.go:7"); !strings.Contains(l, "sin confirmar") || !strings.Contains(l, "origen incierto") {
+		t.Errorf("sin confirmar and origen incierto must both show: %q", l)
+	}
+	if l := lineWith(out, "h.go:8"); !strings.Contains(l, "sin validar") || !strings.Contains(l, "origen incierto") {
+		t.Errorf("sin validar and origen incierto must both show: %q", l)
+	}
+}
+
+func TestReportFailedAgentLabels(t *testing.T) {
+	r := reportResult()
+	r.Failures = []pipeline.Failure{
+		{Agent: "juez_a", Role: "juez", Reason: "se venció el tiempo"},
+		{Agent: "superior_plan", Role: "superior_plan", Reason: "salida inválida"},
+		{Agent: "superior_sintesis", Role: "superior_sintesis", Reason: "salida inválida"},
+		{Agent: "resumen", Role: "resumen", Reason: "salida inválida"},
+		{Agent: "bugs-2", Role: "bugs", Files: []string{"a.go"}, Reason: "salida inválida"},
+		{Agent: "validador_reglas-reglas-001", Role: "validador_reglas", Candidate: "reglas-001", Reason: "salida inválida"},
+	}
+	m, _ := newReport(r)
+	out := rplain(m)
+	for _, want := range []string{
+		"✗ Juez (juez_a). Motivo: se venció el tiempo",
+		"✗ Plan del agente superior (superior_plan). Motivo:",
+		"✗ Síntesis del agente superior (superior_sintesis). Motivo:",
+		"✗ Resumen inicial (resumen). Motivo:",
+		"✗ Bugs y lógica (bugs-2): a.go. Motivo:",
+		"✗ Validador de reglas (validador_reglas-reglas-001): candidato reglas-001. Motivo:",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("footer lacks %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestReportNothingToShow(t *testing.T) {
 	r := pipeline.Result{PR: prb.PR{ID: 1, Title: "t"}, Verdict: finding.VerdictAprobar}
 	m := NewReport(r, sys.System{}, "")

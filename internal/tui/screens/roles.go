@@ -1,6 +1,9 @@
 package screens
 
-import "github.com/LeanMendez/pr-review/internal/config"
+import (
+	"github.com/LeanMendez/pr-review/internal/config"
+	"github.com/LeanMendez/pr-review/internal/prompts"
+)
 
 // roleLabel returns the display name and one-line description of a role, as
 // the model-configuration screen shows them. Unknown roles keep their id.
@@ -28,4 +31,22 @@ func roleLabel(r config.Role) (name, desc string) {
 		return "Juez B", "lo mismo, sin ver al juez A"
 	}
 	return string(r), ""
+}
+
+// promptRoleLabel is the display name of the prompt role an agent ran with
+// (the role of a pipeline.Failure). Unknown roles keep their id.
+func promptRoleLabel(role string) string {
+	switch role {
+	case prompts.RoleSuperiorPlan:
+		return "Plan del agente superior"
+	case prompts.RoleSuperiorSintesis:
+		return "Síntesis del agente superior"
+	case prompts.RoleJuez:
+		return "Juez"
+	case prompts.RoleResumen, prompts.RoleBugs, prompts.RoleSeguridad, prompts.RoleReglas, prompts.RoleTests,
+		prompts.RoleValidadorBugs, prompts.RoleValidadorReglas:
+		name, _ := roleLabel(config.Role(role))
+		return name
+	}
+	return clean(role)
 }
