@@ -128,6 +128,10 @@ func runReview(cmd *cobra.Command, d Deps, repoArg string, n int, mode pipeline.
 		}
 	}()
 
+	// The report dir is private before any agent logs into it.
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("crear %s: %w", dir, err)
+	}
 	events := make(chan pipeline.Event)
 	var printer sync.WaitGroup
 	printer.Add(1)
@@ -142,6 +146,7 @@ func runReview(cmd *cobra.Command, d Deps, repoArg string, n int, mode pipeline.
 	close(events)
 	printer.Wait()
 	if err != nil {
+		_ = os.Remove(dir) // only when empty: agent logs stay
 		return err
 	}
 

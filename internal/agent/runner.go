@@ -93,12 +93,13 @@ func (r Runner) Run(ctx context.Context, s Spec, onActivity func(Activity)) (jso
 		defer cancel()
 	}
 
+	// Logs hold repo contents: private, like the report they live in.
 	var logw io.Writer
 	if r.LogDir != "" {
-		if err := os.MkdirAll(r.LogDir, 0o755); err != nil {
+		if err := os.MkdirAll(r.LogDir, 0o700); err != nil {
 			return nil, &AgentError{s.Name, fmt.Errorf("crear directorio de logs: %w", err)}
 		}
-		f, err := os.Create(filepath.Join(r.LogDir, filepath.Base(s.Name)+".jsonl"))
+		f, err := os.OpenFile(filepath.Join(r.LogDir, filepath.Base(s.Name)+".jsonl"), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 		if err != nil {
 			return nil, &AgentError{s.Name, fmt.Errorf("crear log: %w", err)}
 		}

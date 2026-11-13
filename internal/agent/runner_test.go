@@ -250,3 +250,19 @@ func TestLogWriteFailureDoesNotAbortButIsReportedOnFailure(t *testing.T) {
 		t.Fatalf("res = %+v", res)
 	}
 }
+
+func TestRunLogsArePrivate(t *testing.T) {
+	report := filepath.Join(t.TempDir(), "pr-1-x")
+	r := okRunner(fixture(t, "stream_ok.jsonl"), nil)
+	r.LogDir = filepath.Join(report, "agentes")
+	if _, err := r.Run(context.Background(), Spec{Name: "ag", Dir: "/w"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	for p, want := range map[string]os.FileMode{
+		report: 0o700, r.LogDir: 0o700, filepath.Join(r.LogDir, "ag.jsonl"): 0o600,
+	} {
+		if st, err := os.Stat(p); err != nil || st.Mode().Perm() != want {
+			t.Errorf("%s: mode %v (%v), want %v", p, st.Mode().Perm(), err, want)
+		}
+	}
+}

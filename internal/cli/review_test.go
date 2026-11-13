@@ -252,7 +252,7 @@ func TestWorktreesCleanedUp(t *testing.T) {
 	if h.removed != 2 {
 		t.Fatalf("worktrees removidos = %d, quiero 2", h.removed)
 	}
-	if _, err := os.Stat(filepath.Join(h.reports, "stock")); err == nil {
+	if _, err := os.Stat(filepath.Join(h.reports, "stock", "pr-477-20261112-1030")); err == nil {
 		t.Fatal("no debería escribir el reporte")
 	}
 }
@@ -317,5 +317,43 @@ func TestResolveRepo(t *testing.T) {
 	t.Setenv("BITBUCKET_WORKSPACE", "envws")
 	if got, err := ResolveRepo("stock", ""); err != nil || got != "envws/stock" {
 		t.Errorf("env: %q %v", got, err)
+	}
+}
+
+func TestReportDirPrivateBeforeAgents(t *testing.T) {
+	h := newHarness(t)
+	dir := filepath.Join(h.reports, "stock", "pr-477-20261112-1030")
+	var mode os.FileMode
+	h.agents.onRun = func(agent.Spec) error {
+		if st, err := os.Stat(dir); err == nil {
+			mode = st.Mode().Perm()
+		}
+		return nil
+	}
+	if code, err := h.run(context.Background(), "review", "stock", "477", "--mode", "ligero"); code != 0 {
+		t.Fatalf("code=%d err=%v", code, err)
+	}
+	if mode != 0o700 {
+		t.Errorf("report dir mode %v when the agents ran, want 0700 before the pipeline starts", mode)
+	}
+}
+
+func TestAgentLogsPrivate(t *testing.T) {
+	h := newHarness(t)
+	h.deps.Agents = agent.Runner{Exec: h.deps.Exec, Bin: "claude", Timeout: time.Minute, Sem: make(chan struct{}, 1)}
+	_, _ = h.run(context.Background(), "review", "stock", "477", "--mode", "ligero")
+	dir := filepath.Join(h.reports, "stock", "pr-477-20261112-1030")
+	logs, _ := filepath.Glob(filepath.Join(dir, "agentes", "*.jsonl"))
+	if len(logs) == 0 {
+		t.Fatal("no agent logs")
+	}
+	for _, p := range append([]string{dir, filepath.Join(dir, "agentes")}, logs...) {
+		want := os.FileMode(0o600)
+		if st, _ := os.Stat(p); st.IsDir() {
+			want = 0o700
+		}
+		if st, _ := os.Stat(p); st.Mode().Perm() != want {
+			t.Errorf("%s: mode %v, want %v", p, st.Mode().Perm(), want)
+		}
 	}
 }
