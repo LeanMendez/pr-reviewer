@@ -44,12 +44,15 @@ func DefaultDeps() (Deps, error) {
 	if err != nil {
 		return Deps{}, err
 	}
-	if cfg.CacheDir == "" {
+	// The default cache dir is only used, never put in cfg: saving the
+	// config from the interface must not pin it in the user's file.
+	cacheDir := cfg.CacheDir
+	if cacheDir == "" {
 		base, err := os.UserCacheDir()
 		if err != nil {
 			return Deps{}, fmt.Errorf("ubicando la caché: %w", err)
 		}
-		cfg.CacheDir = filepath.Join(base, "pr-review")
+		cacheDir = filepath.Join(base, "pr-review")
 	}
 	ex := execx.Real()
 	return Deps{
@@ -57,7 +60,7 @@ func DefaultDeps() (Deps, error) {
 		ConfigDir:   filepath.Dir(path),
 		ConfigFound: found,
 		PRB:         prb.Client{Exec: ex},
-		Cache:       repocache.Cache{Exec: ex, Root: filepath.Join(cfg.CacheDir, "repos"), CloneURL: cfg.CloneURL},
+		Cache:       repocache.Cache{Exec: ex, Root: filepath.Join(cacheDir, "repos"), CloneURL: cfg.CloneURL},
 		Agents: agent.Runner{
 			Exec:    ex,
 			Bin:     "claude",
