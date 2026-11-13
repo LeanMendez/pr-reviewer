@@ -34,17 +34,32 @@ var clipboardTools = []struct {
 	{"xsel", []string{"--clipboard", "--input"}},
 }
 
-// Copy puts text on the clipboard using the first tool that is installed.
+// Copy puts text on the clipboard with the first installed tool that works.
+// An installed tool can still fail for the session (wl-copy on X11 cannot
+// reach a Wayland server), so a failure moves on to the next one; when every
+// installed tool fails, their errors come back joined.
 func (s System) Copy(ctx context.Context, text string) error {
+	var errs []error
 	for _, t := range clipboardTools {
 		if _, err := s.LookPath(t.name); err != nil {
 			continue
 		}
-		ctx, cancel := context.WithTimeout(ctx, timeout)
-		defer cancel()
-		return s.Exec(ctx, execx.Cmd{Name: t.name, Args: t.args, Stdin: strings.NewReader(text), Detach: true})
+		if err := s.copyWith(ctx, t.name, t.args, text); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", t.name, err))
+			continue
+		}
+		return nil
 	}
-	return ErrNoClipboard
+	if len(errs) == 0 {
+		return ErrNoClipboard
+	}
+	return errors.Join(errs...)
+}
+
+func (s System) copyWith(ctx context.Context, name string, args []string, text string) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	return s.Exec(ctx, execx.Cmd{Name: name, Args: args, Stdin: strings.NewReader(text), Detach: true})
 }
 
 // Open opens an http or https URL in the default browser; anything else is

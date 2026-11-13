@@ -71,6 +71,26 @@ func TestSysCopyNoClipboard(t *testing.T) {
 	}
 }
 
+// An installed tool can still fail for the session (wl-copy on X11 cannot
+// reach a Wayland server): the next installed tool gets the text.
+func TestSysCopyFallsBackWhenToolFails(t *testing.T) {
+	s, calls := fakeSystem("wl-copy", "xclip")
+	record := s.Exec
+	s.Exec = func(ctx context.Context, c execx.Cmd) error {
+		_ = record(ctx, c)
+		if c.Name == "wl-copy" {
+			return errors.New("exit status 1")
+		}
+		return nil
+	}
+	if err := s.Copy(context.Background(), "hola"); err != nil {
+		t.Fatalf("Copy: %v", err)
+	}
+	if len(*calls) != 2 || (*calls)[0].name != "wl-copy" || (*calls)[1].name != "xclip" || (*calls)[1].stdin != "hola" {
+		t.Errorf("calls = %+v, want wl-copy then xclip with the text", *calls)
+	}
+}
+
 func TestSysCopyReturnsExecError(t *testing.T) {
 	s, _ := fakeSystem("wl-copy")
 	boom := errors.New("boom")
