@@ -321,7 +321,7 @@ func (m ListModel) keys(width int) []components.Key {
 }
 
 func (m ListModel) header(width int) string {
-	left := theme.Strong.Render(" pr-review   ") + theme.Dim.Render(clean(m.repo))
+	left := " " + theme.Brand("pr-review") + "   " + theme.Dim.Render(clean(m.repo))
 	if m.loading || m.err != nil {
 		return left
 	}
@@ -471,7 +471,7 @@ func (m ListModel) row(e entry, selected bool, c columns, tw int) string {
 	pr := e.Ctx.PullRequest
 	prefix := "   "
 	if selected {
-		prefix = " " + theme.Accent.Render("▌") + " "
+		prefix = " " + theme.Marker() + " "
 	}
 	body, num := theme.Text, theme.Text
 	switch {

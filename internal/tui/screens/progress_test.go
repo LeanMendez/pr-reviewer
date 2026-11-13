@@ -114,8 +114,12 @@ func TestProgressAgents(t *testing.T) {
 	if !strings.Contains(m.render(120, 0), strings.TrimSuffix(theme.Accent.Render("x"), "x\x1b[m")+"falló: se cortó") {
 		t.Error("failure must use the Accent color")
 	}
-	if strings.Contains(m.render(120, 0), "\x1b[38;2;238;127;122m") {
-		t.Error("no red on this screen")
+	for _, l := range strings.Split(m.render(120, 0), "\n") {
+		for _, c := range tuitest.Cells(l) {
+			if red := theme.Current().Crit; c.FG == red || c.BG == red {
+				t.Fatalf("no red on this screen: %+v in %q", c, tuitest.Plain(l))
+			}
+		}
 	}
 	if !strings.Contains(out, "2 candidatos hasta ahora.") {
 		t.Errorf("candidate total missing:\n%s", out)

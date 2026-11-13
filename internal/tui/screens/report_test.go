@@ -19,6 +19,7 @@ import (
 	"github.com/LeanMendez/pr-review/internal/report"
 	"github.com/LeanMendez/pr-review/internal/rules"
 	"github.com/LeanMendez/pr-review/internal/tui/sys"
+	"github.com/LeanMendez/pr-review/internal/tui/theme"
 	"github.com/LeanMendez/pr-review/internal/tui/tuitest"
 )
 
@@ -246,21 +247,34 @@ func TestReportMatchesReviewMarkdownClassification(t *testing.T) {
 }
 
 func TestReportOnlyCriticalIsRed(t *testing.T) {
-	const redSeq = "38;2;238;127;122"
+	th := theme.Current()
+	// redText returns the text of the cells of line that use red, and fails
+	// if red is used as anything but the label background under th.Label.
+	redText := func(line string) string {
+		var b strings.Builder
+		for _, c := range tuitest.Cells(line) {
+			if c.FG != th.Crit && c.BG != th.Crit {
+				continue
+			}
+			if c.BG != th.Crit || c.FG != th.Label || c.Reverse {
+				t.Errorf("red cell %+v is not label text on a red background", c)
+			}
+			b.WriteString(c.Text)
+		}
+		return b.String()
+	}
 	m, _ := newReport(reportResult())
-	for name, out := range map[string]string{"default": m.render(110, 0)} {
-		n := 0
-		for _, l := range strings.Split(out, "\n") {
-			if strings.Contains(l, redSeq) {
-				n++
-				if !strings.Contains(tuitest.Plain(l), "Crítico") {
-					t.Errorf("%s: red outside a Crítico label: %q", name, tuitest.Plain(l))
-				}
+	n := 0
+	for _, l := range strings.Split(m.render(110, 0), "\n") {
+		if red := redText(l); red != "" {
+			n++
+			if red != " Crítico " {
+				t.Errorf("red outside a Crítico label: %q in %q", red, tuitest.Plain(l))
 			}
 		}
-		if n != 1 {
-			t.Errorf("%s: red lines = %d, want 1", name, n)
-		}
+	}
+	if n != 1 {
+		t.Errorf("red lines = %d, want 1", n)
 	}
 	// no critical findings: no red at all, even with failures and gaps
 	r := reportResult()
@@ -269,8 +283,10 @@ func TestReportOnlyCriticalIsRed(t *testing.T) {
 	r.Failures = []pipeline.Failure{{Agent: "bugs-1", Role: "bugs", Files: []string{"a.go"}, Reason: "boom"}}
 	m2, _ := newReport(r)
 	m2, _ = rkey(m2, "l")
-	if strings.Contains(m2.render(110, 0), redSeq) {
-		t.Errorf("red used without a critical finding")
+	for _, l := range strings.Split(m2.render(110, 0), "\n") {
+		if red := redText(l); red != "" {
+			t.Errorf("red used without a critical finding: %q", red)
+		}
 	}
 }
 

@@ -4,6 +4,8 @@ package components
 import (
 	"strings"
 
+	"charm.land/lipgloss/v2"
+
 	"github.com/LeanMendez/pr-review/internal/tui/theme"
 )
 
@@ -31,10 +33,7 @@ func SizeBar(lines, threshold int) string {
 	}
 	filled, partial := cells(float64(base)/cell, barCells)
 	var b strings.Builder
-	b.WriteString(theme.Dim.Render(filled))
-	if partial != "" {
-		b.WriteString(theme.Dim.Render(partial))
-	}
+	b.WriteString(paintFilled(filled + partial))
 	empty := barCells - len([]rune(filled)) - len([]rune(partial))
 	b.WriteString(theme.Tick.Render(strings.Repeat("·", empty) + "│"))
 
@@ -53,6 +52,22 @@ func SizeBar(lines, threshold int) string {
 	pad := overflowCells + 1 - len([]rune(tail))
 	b.WriteString(theme.Accent.Render(tail))
 	b.WriteString(strings.Repeat(" ", pad))
+	return b.String()
+}
+
+// paintFilled colors the filled cells up to the tick: in Dim, or, if the
+// theme has a gradient, each cell with the gradient color of its position
+// along the 8.
+func paintFilled(s string) string {
+	th := theme.Current()
+	if len(th.Gradient) == 0 {
+		return theme.Dim.Render(s)
+	}
+	var b strings.Builder
+	for i, r := range []rune(s) {
+		c := theme.GradientAt(th.Gradient, float64(i)/(barCells-1), th.BG, 3)
+		b.WriteString(theme.Dim.Foreground(lipgloss.Color(c)).Render(string(r)))
+	}
 	return b.String()
 }
 
