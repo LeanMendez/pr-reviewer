@@ -7,9 +7,11 @@ import (
 )
 
 // Key builds a Bubble Tea key press: up, down, left, right, enter, esc, or a
-// single letter.
+// single letter. "backspace" is also accepted.
 func Key(name string) tea.Msg {
 	switch name {
+	case "backspace":
+		return tea.KeyPressMsg{Code: tea.KeyBackspace}
 	case "up":
 		return tea.KeyPressMsg{Code: tea.KeyUp}
 	case "down":
