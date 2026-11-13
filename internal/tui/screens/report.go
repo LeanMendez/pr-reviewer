@@ -468,7 +468,7 @@ func (m ReportModel) layout(width int) layout {
 			meta = append(meta, s)
 		}
 	}
-	add(theme.Strong.Render(" pr-review   ")+theme.Text.Render(fmt.Sprintf("#%d %s", r.PR.ID, clean(r.PR.Title)))+
+	add(" "+theme.Brand("pr-review")+"   "+theme.Text.Render(fmt.Sprintf("#%d %s", r.PR.ID, clean(r.PR.Title)))+
 		theme.Dim.Render("   "+strings.Join(meta, ", ")), "")
 	name, rest, _ := strings.Cut(report.VerdictText(r), ". ")
 	add(flow(width, "  ", "  ", seg{theme.Strong, name + "."}, seg{theme.Text, " " + rest})...)
@@ -481,7 +481,7 @@ func (m ReportModel) layout(width int) layout {
 	lay.end = make([]int, len(items))
 	mark := func(i int) string {
 		if i == cursor {
-			return " " + theme.Accent.Render("▌") + " "
+			return " " + theme.Marker() + " "
 		}
 		return "   "
 	}

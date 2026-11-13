@@ -282,7 +282,7 @@ func (m OnboardingModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m OnboardingModel) View() tea.View { return tea.NewView(m.render(m.width, m.height)) }
 
 func (m OnboardingModel) header(n int) string {
-	return theme.Strong.Render(" pr-review") + theme.Dim.Render(fmt.Sprintf("   configuración inicial, paso %d de 3", n))
+	return " " + theme.Brand("pr-review") + theme.Dim.Render(fmt.Sprintf("   configuración inicial, paso %d de 3", n))
 }
 
 func (m OnboardingModel) render(width, height int) string {

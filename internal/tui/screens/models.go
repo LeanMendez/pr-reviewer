@@ -170,7 +170,7 @@ func (m ModelsModel) render(width, height int) string {
 		cambios = "1 cambio"
 	}
 	lines := []string{
-		theme.Strong.Render(" pr-review") + theme.Dim.Render("   configuración, modelos      ") +
+		" " + theme.Brand("pr-review") + theme.Dim.Render("   configuración, modelos      ") +
 			theme.Dim.Render(fmt.Sprintf("partiste de %s, con %s", from, cambios)),
 		"",
 		theme.Dim.Render(fmt.Sprintf("    %-21s%-38s%-12s%s", "agente", "qué hace", "modelo", "esfuerzo")),
@@ -211,7 +211,7 @@ func (m ModelsModel) row(r config.Role, selected bool) string {
 	mark, nameStyle := "    ", theme.Text
 	model := theme.Ref.Render(fmt.Sprintf("  %-10s", a.Model))
 	if selected {
-		mark, nameStyle = " "+theme.Accent.Render("▌")+"  ", theme.Strong
+		mark, nameStyle = " "+theme.Marker()+"  ", theme.Strong
 		model = theme.Accent.Render(fmt.Sprintf("‹ %-6s ›  ", a.Model))
 	}
 	effort := theme.Text.Render(fmt.Sprintf("%-9s", effortLabel(a.Effort)))

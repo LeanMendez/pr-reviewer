@@ -84,7 +84,7 @@ func (m PresetPickerModel) View() tea.View { return tea.NewView(m.render(m.width
 func (m PresetPickerModel) render(width, height int) string {
 	cur := presetOptions[m.cursor]
 	lines := []string{
-		theme.Strong.Render(" pr-review") + theme.Dim.Render("   configuración inicial, paso 3 de 3"),
+		" " + theme.Brand("pr-review") + theme.Dim.Render("   configuración inicial, paso 3 de 3"),
 		"",
 		theme.Strong.Render("  Elegí qué modelos usan los agentes."),
 		theme.Dim.Render("  Después lo podés cambiar desde la lista con la tecla m."),
@@ -93,7 +93,7 @@ func (m PresetPickerModel) render(width, height int) string {
 	for i, o := range presetOptions {
 		mark, dot, name := "  ", theme.Dim.Render("○ "), theme.Text
 		if i == m.cursor {
-			mark, dot, name = theme.Accent.Render(" ▌"), theme.Accent.Render("● "), theme.Strong
+			mark, dot, name = " "+theme.Marker(), theme.Accent.Render("● "), theme.Strong
 		}
 		rec := strings.Repeat(" ", len("recomendado")+2)
 		if o.recommended {

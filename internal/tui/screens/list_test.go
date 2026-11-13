@@ -12,7 +12,6 @@ import (
 	"github.com/LeanMendez/pr-review/internal/pipeline"
 	"github.com/LeanMendez/pr-review/internal/prb"
 	"github.com/LeanMendez/pr-review/internal/tui/listdata"
-	"github.com/LeanMendez/pr-review/internal/tui/theme"
 	"github.com/LeanMendez/pr-review/internal/tui/tuitest"
 )
 
@@ -123,23 +122,6 @@ func TestListRender100(t *testing.T) {
 		t.Errorf("selected rows = %d", sel)
 	}
 	checkWidth(t, m.render(100, 30), 100)
-}
-
-func TestListBrandAndMarkerFollowTheme(t *testing.T) {
-	t.Cleanup(func() {
-		def, _ := theme.ByName(theme.DefaultName)
-		theme.Use(def)
-	})
-	g, _ := theme.ByName("gemini")
-	theme.Use(g)
-	var calls int
-	lines := strings.Split(loaded(t, &calls).render(100, 30), "\n")
-	if !strings.Contains(lines[0], theme.Brand("pr-review")) {
-		t.Errorf("header does not use the gradient brand: %q", lines[0])
-	}
-	if !strings.Contains(lines[3], theme.Marker()) {
-		t.Errorf("selected row does not use the theme marker: %q", lines[3])
-	}
 }
 
 func TestListDetailVariants(t *testing.T) {

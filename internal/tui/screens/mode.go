@@ -77,7 +77,7 @@ func (m ModeModel) View() tea.View { return tea.NewView(m.render(m.width, m.heig
 func (m ModeModel) render(width, height int) string {
 	pr := m.row.Ctx.PullRequest
 	lines := []string{
-		theme.Strong.Render(" pr-review   ") + theme.Dim.Render(fmt.Sprintf("#%d  %s", pr.ID, clean(pr.Title))),
+		" " + theme.Brand("pr-review") + "   " + theme.Dim.Render(fmt.Sprintf("#%d  %s", pr.ID, clean(pr.Title))),
 		"",
 		theme.Text.Render(" Elegí cómo revisarlo"),
 		"",
@@ -109,7 +109,7 @@ func (m ModeModel) render(width, height int) string {
 func (m ModeModel) modeLines(md pipeline.Mode, selected bool) []string {
 	prefix, name := "   ", theme.Text
 	if selected {
-		prefix, name = " "+theme.Accent.Render("▌")+" ", theme.Strong
+		prefix, name = " "+theme.Marker()+" ", theme.Strong
 	}
 	title := prefix + name.Render(string(md))
 	if md == m.row.Suggested {
