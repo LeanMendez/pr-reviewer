@@ -19,9 +19,12 @@ import (
 	"github.com/LeanMendez/pr-review/internal/tui/theme"
 )
 
-// RowsLoadedMsg carries the result of a (re)load of the list.
+// RowsLoadedMsg carries the result of a load of the list: a first page that
+// replaces the rows, or the next page, appended, when the screen asked for
+// more. More says whether prb may have older PRs.
 type RowsLoadedMsg struct {
 	Ready, Hidden []listdata.Row
+	More          bool
 	Err           error
 }
 
@@ -48,18 +51,29 @@ const (
 
 	minWidthAuthor = 100 // below this the author column goes away
 	minWidthBar    = 80  // below this the size bar goes away
+
+	// The list loads the firstPage most recently updated PRs, then nextPage
+	// more each time the cursor reaches the last row: every PR costs a
+	// `prb pr context`, so loading all of them up front is slow.
+	firstPage = 10
+	nextPage  = 20
 )
 
 // ListModel is the PR list screen: a table of PRs ready for review and the
 // detail of the selected one below it.
 type ListModel struct {
 	repo string
-	load func() tea.Cmd
+	load func(limit int, have map[int]bool) tea.Cmd
 
 	ready, hidden []listdata.Row
 	loading       bool
 	err           error
 	loadedAt      time.Time
+	// more says prb may have older PRs; loadingMore, that the next page is
+	// on its way. Only one load runs at a time, so the next RowsLoadedMsg
+	// answers it. requested is how many PRs the last load asked for.
+	more, loadingMore bool
+	requested         int
 
 	cursor, top int
 	showHidden  bool
@@ -73,9 +87,10 @@ type ListModel struct {
 }
 
 // NewList builds the screen for repo ("workspace/slug"); load starts a load
-// whose result arrives as a RowsLoadedMsg.
-func NewList(repo string, load func() tea.Cmd) ListModel {
-	return ListModel{repo: repo, load: load, loading: true, threshold: defaultThreshold, now: time.Now}
+// of at most limit PRs, skipping the ones in have, whose result arrives as a
+// RowsLoadedMsg.
+func NewList(repo string, load func(limit int, have map[int]bool) tea.Cmd) ListModel {
+	return ListModel{repo: repo, load: load, loading: true, requested: firstPage, threshold: defaultThreshold, now: time.Now}
 }
 
 // WithThreshold sets the size threshold (lines) of the bar and the warning.
@@ -124,7 +139,22 @@ func (m ListModel) startLoad() tea.Cmd {
 	if m.load == nil {
 		return nil
 	}
-	return m.load()
+	return m.load(firstPage, nil)
+}
+
+// loadMore asks for the next page when prb may have more PRs and no load is
+// running; its rows are appended when they arrive.
+func (m ListModel) loadMore() (tea.Model, tea.Cmd) {
+	if !m.more || m.loading || m.loadingMore || m.err != nil || m.load == nil {
+		return m, nil
+	}
+	have := map[int]bool{}
+	for _, r := range slices.Concat(m.ready, m.hidden) {
+		have[r.Ctx.PullRequest.ID] = true
+	}
+	m.loadingMore = true
+	m.requested += nextPage
+	return m, m.load(m.requested, have)
 }
 
 // Update handles window sizes, loaded rows and key presses.
@@ -134,10 +164,26 @@ func (m ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		m.scroll()
 	case RowsLoadedMsg:
+		if m.loadingMore {
+			// The next page: appended, with the cursor where it was. A failure
+			// keeps the rows and the next press at the end retries it.
+			m.loadingMore = false
+			if msg.Err != nil {
+				m.requested -= nextPage
+				m.note = clean("No pude cargar más PRs: " + msg.Err.Error())
+			} else {
+				m.ready = append(slices.Clone(m.ready), msg.Ready...)
+				m.hidden = append(slices.Clone(m.hidden), msg.Hidden...)
+				m.more = msg.More
+			}
+			m.clamp()
+			break
+		}
 		m.loading = false
 		m.err = msg.Err
 		if msg.Err == nil {
 			m.ready, m.hidden = msg.Ready, msg.Hidden
+			m.more = msg.More
 			m.loadedAt = m.now()
 		}
 		m.cursor, m.top = 0, 0
@@ -179,7 +225,12 @@ func (m ListModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "t":
 		m.showHidden = !m.showHidden
 	case "r":
-		m.loading, m.err = true, nil
+		// One load at a time: a second one could answer as the wrong load
+		// (a first page taken for the next one duplicates rows).
+		if m.loading || m.loadingMore {
+			break
+		}
+		m.loading, m.err, m.requested = true, nil, firstPage
 		return m, m.startLoad()
 	case "m":
 		return m, emit(OpenSettingsMsg{})
@@ -187,6 +238,9 @@ func (m ListModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, emit(QuitMsg{})
 	}
 	m.clamp()
+	if k == "down" && m.cursor >= len(m.visible())-1 {
+		return m.loadMore()
+	}
 	return m, nil
 }
 
@@ -393,7 +447,16 @@ func (m ListModel) filterLine() string {
 	if m.note != "" {
 		return theme.Accent.Render(" " + m.note)
 	}
-	return m.filter.line()
+	if l := m.filter.line(); l != "" {
+		return l
+	}
+	switch {
+	case m.loadingMore:
+		return theme.Dim.Render(" Cargando más PRs…")
+	case m.more:
+		return theme.Dim.Render(fmt.Sprintf(" Hay más PRs: bajá hasta el último para cargar %d más.", nextPage))
+	}
+	return ""
 }
 
 func (m ListModel) hiddenLine() string {

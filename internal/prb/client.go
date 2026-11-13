@@ -101,9 +101,10 @@ func (c Client) AuthStatus(ctx context.Context) (Identity, error) {
 	return decode[Identity](out, "auth status")
 }
 
-// ListOpen lists the open PRs of repo.
-func (c Client) ListOpen(ctx context.Context, repo string) ([]PRSummary, error) {
-	out, err := c.run(ctx, "pr", "list", "-R", repo, "--state", "OPEN", "--limit", "0", "-o", "json")
+// ListOpen lists the open PRs of repo, most recently updated first (prb's
+// fixed order): at most limit of them, or all when limit is 0.
+func (c Client) ListOpen(ctx context.Context, repo string, limit int) ([]PRSummary, error) {
+	out, err := c.run(ctx, "pr", "list", "-R", repo, "--state", "OPEN", "--limit", strconv.Itoa(max(0, limit)), "-o", "json")
 	if err != nil {
 		return nil, err
 	}

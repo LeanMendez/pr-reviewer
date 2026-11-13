@@ -1,6 +1,8 @@
 package screens
 
 import (
+	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -52,7 +54,7 @@ func sampleHidden() []listdata.Row {
 
 func loaded(t *testing.T, calls *int) ListModel {
 	t.Helper()
-	m := NewList("equipo/api-pagos", func() tea.Cmd { *calls++; return nil })
+	m := NewList("equipo/api-pagos", func(int, map[int]bool) tea.Cmd { *calls++; return nil })
 	m.now = func() time.Time { return now }
 	m.loadedAt = now.Add(-time.Minute)
 	m = update(m, tea.WindowSizeMsg{Width: 100, Height: 30})
@@ -494,5 +496,148 @@ func TestListKeyHelpKeepsSettingsAndQuit(t *testing.T) {
 				t.Errorf("width %d: %q dropped too early from %q", tc.width, kept, help)
 			}
 		}
+	}
+}
+
+func lplain(m ListModel) string { return tuitest.Plain(m.render(100, 30)) }
+
+// pagedList records every load the screen asks for.
+type pageReq struct {
+	limit int
+	have  []int
+}
+
+func pagedList(t *testing.T, reqs *[]pageReq) ListModel {
+	t.Helper()
+	m := NewList("equipo/api-pagos", func(limit int, have map[int]bool) tea.Cmd {
+		r := pageReq{limit: limit}
+		for id := range have {
+			r.have = append(r.have, id)
+		}
+		slices.Sort(r.have)
+		*reqs = append(*reqs, r)
+		return func() tea.Msg { return nil }
+	})
+	m.now = func() time.Time { return now }
+	return update(m, tea.WindowSizeMsg{Width: 100, Height: 30})
+}
+
+func TestListLoadsTenThenTwentyMoreAtTheEnd(t *testing.T) {
+	var reqs []pageReq
+	m := pagedList(t, &reqs)
+	m.Init()
+	if len(reqs) != 1 || reqs[0].limit != 10 || len(reqs[0].have) != 0 {
+		t.Fatalf("first load = %+v, want limit 10 and nothing loaded", reqs)
+	}
+	first := sampleReady()[:3]
+	m = update(m, RowsLoadedMsg{Ready: first, More: true})
+	if out := lplain(m); !strings.Contains(out, "Hay más PRs") {
+		t.Errorf("no hint about more PRs:\n%s", out)
+	}
+
+	m = update(m, tuitest.Key("down"))
+	if len(reqs) != 1 {
+		t.Fatalf("loaded more before the end: %+v", reqs)
+	}
+	n, cmd := m.Update(tuitest.Key("down"))
+	m = n.(ListModel)
+	if cmd == nil || len(reqs) != 2 || reqs[1].limit != 30 || !slices.Equal(reqs[1].have, []int{88, 477, 482}) {
+		t.Fatalf("at the end: reqs = %+v, want limit 30 with the 3 loaded", reqs)
+	}
+	if out := lplain(m); !strings.Contains(out, "Cargando más PRs") {
+		t.Errorf("no loading-more line:\n%s", out)
+	}
+	m = update(m, tuitest.Key("down"))
+	if len(reqs) != 2 {
+		t.Errorf("a second load started while one was running: %+v", reqs)
+	}
+	m = update(m, tuitest.Key("r"))
+	if len(reqs) != 2 {
+		t.Errorf("r reloaded while more were loading: %+v", reqs)
+	}
+
+	m = update(m, RowsLoadedMsg{Ready: sampleReady()[3:], More: false})
+	if got := len(m.visible()); got != 5 {
+		t.Fatalf("visible = %d, want the 3 loaded plus 2 more", got)
+	}
+	if m.cursor != 2 {
+		t.Errorf("cursor = %d, loading more must not move it", m.cursor)
+	}
+	for i := 0; i < 5; i++ {
+		m = update(m, tuitest.Key("down"))
+	}
+	if len(reqs) != 2 {
+		t.Errorf("loaded again with nothing more: %+v", reqs)
+	}
+	if out := lplain(m); strings.Contains(out, "Hay más PRs") {
+		t.Errorf("hint shown with nothing more:\n%s", out)
+	}
+}
+
+// When the first page has nothing ready, the user can still ask for more.
+func TestListLoadsMoreWhenNothingIsReady(t *testing.T) {
+	var reqs []pageReq
+	m := pagedList(t, &reqs)
+	m = update(m, RowsLoadedMsg{Hidden: sampleHidden(), More: true})
+	m = update(m, tuitest.Key("down"))
+	if len(reqs) != 1 || reqs[0].limit != 30 || !slices.Equal(reqs[0].have, []int{500, 501}) {
+		t.Errorf("reqs = %+v, want limit 30 with the hidden ones as loaded", reqs)
+	}
+}
+
+// A failed "load more" keeps the rows, says so, and the next press retries.
+func TestListLoadMoreFailureKeepsRows(t *testing.T) {
+	var reqs []pageReq
+	m := pagedList(t, &reqs)
+	m = update(m, RowsLoadedMsg{Ready: sampleReady()[:1], More: true})
+	m = update(m, tuitest.Key("down"))
+	m = update(m, RowsLoadedMsg{Err: errors.New("timeout")})
+	if len(m.visible()) != 1 || m.err != nil {
+		t.Fatalf("rows lost or screen in error: visible=%d err=%v", len(m.visible()), m.err)
+	}
+	if out := lplain(m); !strings.Contains(out, "No pude cargar más PRs") {
+		t.Errorf("failure not shown:\n%s", out)
+	}
+	m = update(m, tuitest.Key("down"))
+	if len(reqs) != 2 || reqs[1].limit != 30 {
+		t.Errorf("retry = %+v, want the same limit 30 again", reqs)
+	}
+}
+
+// r while the first page is loading would start a second load, whose answer
+// could then land as a "load more" page and duplicate the rows.
+func TestListRefreshIgnoredWhileFirstPageLoads(t *testing.T) {
+	var reqs []pageReq
+	m := pagedList(t, &reqs)
+	m.Init()
+	m = update(m, tuitest.Key("r"))
+	if len(reqs) != 1 {
+		t.Fatalf("r started a second load during the first: %+v", reqs)
+	}
+	m = update(m, RowsLoadedMsg{Ready: sampleReady()[:2], More: true})
+	m = update(m, tuitest.Key("r"))
+	if len(reqs) != 2 || reqs[1].limit != 10 {
+		t.Errorf("r after the load = %+v, want a new first page", reqs)
+	}
+}
+
+// r starts over from the first page and replaces the rows.
+func TestListRefreshStartsOverWithFirstPage(t *testing.T) {
+	var reqs []pageReq
+	m := pagedList(t, &reqs)
+	m = update(m, RowsLoadedMsg{Ready: sampleReady()[:1], More: true})
+	m = update(m, tuitest.Key("down"))
+	m = update(m, RowsLoadedMsg{Ready: sampleReady()[1:3], More: true})
+	m = update(m, tuitest.Key("r"))
+	if last := reqs[len(reqs)-1]; last.limit != 10 || len(last.have) != 0 {
+		t.Fatalf("refresh = %+v, want limit 10 and nothing loaded", last)
+	}
+	m = update(m, RowsLoadedMsg{Ready: sampleReady()[4:], More: true})
+	if got := len(m.visible()); got != 1 {
+		t.Errorf("visible after refresh = %d, want only the new first page", got)
+	}
+	m = update(m, tuitest.Key("down"))
+	if last := reqs[len(reqs)-1]; last.limit != 30 || !slices.Equal(last.have, []int{1288}) {
+		t.Errorf("more after refresh = %+v, want limit 30 from the new page", last)
 	}
 }

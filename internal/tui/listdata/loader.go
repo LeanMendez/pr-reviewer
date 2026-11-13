@@ -4,6 +4,7 @@ package listdata
 import (
 	"context"
 	"path"
+	"slices"
 	"sort"
 	"time"
 
@@ -38,13 +39,24 @@ type Loader struct {
 	Parallel    int // simultaneous `prb pr context` calls; 6 when zero
 }
 
-// Load lists the open PRs of repo ("workspace/slug"), fetches each context in
-// parallel and splits them into ready and hidden, both newest first.
+// Load lists every open PR of repo ("workspace/slug"), fetches each context
+// in parallel and splits them into ready and hidden, both newest first.
 func (l Loader) Load(ctx context.Context, repo string) (ready []Row, hidden []Row, err error) {
-	list, err := l.PRB.ListOpen(ctx, repo)
+	ready, hidden, _, err = l.LoadPage(ctx, repo, 0, nil)
+	return ready, hidden, err
+}
+
+// LoadPage is Load for the limit most recently updated open PRs (all when
+// limit is 0), skipping the ones in have: their contexts, the slow part, are
+// not fetched again. more says whether prb may have older PRs, which is when
+// it returned the whole limit.
+func (l Loader) LoadPage(ctx context.Context, repo string, limit int, have map[int]bool) (ready, hidden []Row, more bool, err error) {
+	list, err := l.PRB.ListOpen(ctx, repo, limit)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
+	more = limit > 0 && len(list) >= limit
+	list = slices.DeleteFunc(list, func(s prb.PRSummary) bool { return have[s.ID] })
 	parallel := l.Parallel
 	if parallel <= 0 {
 		parallel = defaultParallel
@@ -63,7 +75,7 @@ func (l Loader) Load(ctx context.Context, repo string) (ready []Row, hidden []Ro
 		})
 	}
 	if err := g.Wait(); err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 
 	slug := path.Base(repo) // report dirs are <root>/<slug>/...
@@ -78,7 +90,7 @@ func (l Loader) Load(ctx context.Context, repo string) (ready []Row, hidden []Ro
 	}
 	sortNewestFirst(ready)
 	sortNewestFirst(hidden)
-	return ready, hidden, nil
+	return ready, hidden, more, nil
 }
 
 func (l Loader) row(slug string, c prb.PRContext) Row {

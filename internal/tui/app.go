@@ -257,17 +257,19 @@ func (a App) active() tea.Model {
 }
 
 // loadRows builds the list's load: who the user is (to hide their own PRs)
-// and the open PRs of repo, with their last review under the reports root.
-func (a App) loadRows(repo string) func() tea.Cmd {
+// and at most limit open PRs of repo not in have, with their last review
+// under the reports root.
+func (a App) loadRows(repo string) func(limit int, have map[int]bool) tea.Cmd {
 	ctx, prbc, cfg, root := a.ctx, a.s.d.PRB, a.s.d.Cfg, a.s.root
-	return func() tea.Cmd {
+	return func(limit int, have map[int]bool) tea.Cmd {
 		return func() tea.Msg {
 			me, err := prbc.AuthStatus(ctx)
 			if err != nil {
 				return screens.RowsLoadedMsg{Err: err}
 			}
-			ready, hidden, err := listdata.Loader{PRB: prbc, Me: me, ReportsRoot: root, Cfg: cfg}.Load(ctx, repo)
-			return screens.RowsLoadedMsg{Ready: ready, Hidden: hidden, Err: err}
+			l := listdata.Loader{PRB: prbc, Me: me, ReportsRoot: root, Cfg: cfg}
+			ready, hidden, more, err := l.LoadPage(ctx, repo, limit, have)
+			return screens.RowsLoadedMsg{Ready: ready, Hidden: hidden, More: more, Err: err}
 		}
 	}
 }

@@ -67,7 +67,7 @@ func TestEveryScreenIsReadableInEveryTheme(t *testing.T) {
 			var n int
 			return update(loaded(t, &n), RowsLoadedMsg{Err: errors.New("boom")}).render(100, 30)
 		}},
-		{"list-loading", 100, 30, func() string { return NewList("a/b", func() tea.Cmd { return nil }).render(100, 30) }},
+		{"list-loading", 100, 30, func() string { return NewList("a/b", func(int, map[int]bool) tea.Cmd { return nil }).render(100, 30) }},
 		{"repopicker", 80, 20, func() string { var n int; return loadedPicker(t, &n, sampleRepos()).render(80, 20) }},
 		{"repopicker-filter", 80, 20, func() string {
 			var n int

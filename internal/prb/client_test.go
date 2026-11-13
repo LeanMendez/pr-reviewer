@@ -143,7 +143,7 @@ func TestAuthStatus(t *testing.T) {
 
 func TestListOpen(t *testing.T) {
 	var got []string
-	prs, err := fake(fixture(t, "list.json"), "", 0, &got).ListOpen(context.Background(), "ws/stock")
+	prs, err := fake(fixture(t, "list.json"), "", 0, &got).ListOpen(context.Background(), "ws/stock", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,6 +153,18 @@ func TestListOpen(t *testing.T) {
 	}
 	if len(prs) != 2 || prs[0].ID != 42 || !prs[0].Draft || prs[1].Author != "Bruno Gomez" {
 		t.Errorf("prs = %+v", prs)
+	}
+}
+
+// A positive limit asks prb for only the most recently updated PRs.
+func TestListOpenWithLimit(t *testing.T) {
+	var got []string
+	if _, err := fake(fixture(t, "list.json"), "", 0, &got).ListOpen(context.Background(), "ws/stock", 10); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"pr", "list", "-R", "ws/stock", "--state", "OPEN", "--limit", "10", "-o", "json"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("args = %v, want %v", got, want)
 	}
 }
 
