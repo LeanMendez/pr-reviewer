@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/LeanMendez/pr-review/internal/execx"
 	"github.com/LeanMendez/pr-review/internal/prb"
@@ -28,8 +29,30 @@ type Cache struct {
 // Worktrees are the checkouts of a PR's source (Head) and destination (Base).
 type Worktrees struct{ Head, Base string }
 
+// repoLocks serializes the git work on each cached repo (clone, fetch,
+// worktree add and remove) between the reviews of this process: one
+// channel of capacity 1 per repo dir.
+var repoLocks sync.Map
+
+// lockRepo waits for the repo at dir, or for ctx, and returns the unlock.
+func lockRepo(ctx context.Context, dir string) (func(), error) {
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
+	v, _ := repoLocks.LoadOrStore(dir, make(chan struct{}, 1))
+	lock := v.(chan struct{})
+	select {
+	case lock <- struct{}{}:
+		return func() { <-lock }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 // Prepare clones the repo if needed, fetches both branches and creates the
-// head and base worktrees. The returned func removes them.
+// head and base worktrees in a directory of their own, so concurrent
+// reviews, even of the same PR and commit, never share or remove each
+// other's. The returned func removes them.
 func (c Cache) Prepare(ctx context.Context, workspace, repo string, pr prb.PR) (Worktrees, func() error, error) {
 	src, dst := pr.Source.Repository, pr.Destination.Repository
 	if src != "" && dst != "" && src != dst {
@@ -46,6 +69,11 @@ func (c Cache) Prepare(ctx context.Context, workspace, repo string, pr prb.PR) (
 	if err := c.contained(repoDir); err != nil {
 		return Worktrees{}, nil, err
 	}
+	unlock, err := lockRepo(ctx, base0)
+	if err != nil {
+		return Worktrees{}, nil, err
+	}
+	defer unlock()
 	if _, err := os.Stat(filepath.Join(repoDir, ".git")); err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			return Worktrees{}, nil, err
@@ -59,7 +87,8 @@ func (c Cache) Prepare(ctx context.Context, workspace, repo string, pr prb.PR) (
 		}
 	}
 
-	if _, err := c.git(ctx, repoDir, "fetch", "--quiet", "origin", pr.Source.Branch, pr.Destination.Branch); err != nil {
+	// Branch names come from the PR: as full refs, none can read as an option.
+	if _, err := c.git(ctx, repoDir, "fetch", "--quiet", "origin", "refs/heads/"+pr.Source.Branch, "refs/heads/"+pr.Destination.Branch); err != nil {
 		return Worktrees{}, nil, fmt.Errorf("fetch de %s/%s: %w", workspace, repo, err)
 	}
 	head, err := c.git(ctx, repoDir, "rev-parse", pr.Source.Commit+"^{commit}")
@@ -71,22 +100,24 @@ func (c Cache) Prepare(ctx context.Context, workspace, repo string, pr prb.PR) (
 		return Worktrees{}, nil, fmt.Errorf("resolviendo commit destino %q: %w", pr.Destination.Commit, err)
 	}
 
-	dir := filepath.Join(base0, "worktrees", fmt.Sprintf("pr%d-%s", pr.ID, head[:min(12, len(head))]))
-	if err := c.contained(dir); err != nil {
+	parent := filepath.Join(base0, "worktrees")
+	if err := c.contained(parent); err != nil {
+		return Worktrees{}, nil, err
+	}
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return Worktrees{}, nil, err
+	}
+	dir, err := os.MkdirTemp(parent, fmt.Sprintf("pr%d-%s-", pr.ID, head[:min(12, len(head))]))
+	if err != nil {
 		return Worktrees{}, nil, err
 	}
 	wt := Worktrees{Head: filepath.Join(dir, "head"), Base: filepath.Join(dir, "base")}
 
-	// Drop leftovers from an earlier run of the same PR/commit.
-	for _, p := range []string{wt.Head, wt.Base} {
-		_, _ = c.git(ctx, repoDir, "worktree", "remove", "--force", p)
-	}
-	if err := os.RemoveAll(dir); err != nil {
-		return Worktrees{}, nil, err
-	}
+	// Forget worktrees whose directories are gone.
 	_, _ = c.git(ctx, repoDir, "worktree", "prune")
 
 	if _, err := c.git(ctx, repoDir, "worktree", "add", "--detach", wt.Head, head); err != nil {
+		_ = os.RemoveAll(dir)
 		return Worktrees{}, nil, fmt.Errorf("worktree head: %w", err)
 	}
 	if _, err := c.git(ctx, repoDir, "worktree", "add", "--detach", wt.Base, base); err != nil {
@@ -98,6 +129,8 @@ func (c Cache) Prepare(ctx context.Context, workspace, repo string, pr prb.PR) (
 	cleanup := func() error {
 		// Review contexts get cancelled on quit; cleanup must still run.
 		ctx := context.WithoutCancel(ctx)
+		unlock, _ := lockRepo(ctx, base0) // never fails without a cancel
+		defer unlock()
 		var errs []error
 		for _, p := range []string{wt.Head, wt.Base} {
 			if _, err := c.git(ctx, repoDir, "worktree", "remove", "--force", p); err != nil {

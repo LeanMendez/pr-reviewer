@@ -7,7 +7,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/LeanMendez/pr-review/internal/execx"
@@ -174,9 +176,11 @@ func TestWorktreeLayoutIsSiblingOfClone(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer cleanup()
-	want := filepath.Join(c.Root, "ws", "repo", "worktrees", "pr7-"+feature[:12])
-	if wt.Head != filepath.Join(want, "head") || wt.Base != filepath.Join(want, "base") {
-		t.Errorf("got %s, %s; want under %s", wt.Head, wt.Base, want)
+	dir := filepath.Dir(wt.Head)
+	if filepath.Dir(dir) != filepath.Join(c.Root, "ws", "repo", "worktrees") ||
+		!strings.HasPrefix(filepath.Base(dir), "pr7-"+feature[:12]+"-") ||
+		wt.Head != filepath.Join(dir, "head") || wt.Base != filepath.Join(dir, "base") {
+		t.Errorf("got %s, %s; want <root>/ws/repo/worktrees/pr7-%s-<unique>/{head,base}", wt.Head, wt.Base, feature[:12])
 	}
 }
 
@@ -234,5 +238,83 @@ func TestCleanupWorksAfterContextCancel(t *testing.T) {
 	}
 	if exists(wt.Head) || exists(wt.Base) {
 		t.Error("worktrees leaked after cancel")
+	}
+}
+
+func TestConcurrentPreparesOfOneRepo(t *testing.T) {
+	origin, develop, feature := fixture(t)
+	c := Cache{Exec: execx.Real(), Root: t.TempDir(), CloneURL: origin}
+	const n = 4
+	trees := make([]Worktrees, n)
+	cleanups := make([]func() error, n)
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			// The same PR and commit, from a fresh cache: clone, fetch and
+			// worktrees all race without a lock.
+			trees[i], cleanups[i], errs[i] = c.Prepare(context.Background(), "ws", "repo", newPR(develop, feature))
+		}()
+	}
+	wg.Wait()
+	seen := map[string]bool{}
+	for i := range n {
+		if errs[i] != nil {
+			t.Fatalf("prepare %d: %v", i, errs[i])
+		}
+		if seen[trees[i].Head] {
+			t.Fatalf("two reviews share %s", trees[i].Head)
+		}
+		seen[trees[i].Head] = true
+	}
+	// Cleaning up one review leaves the others' worktrees alone.
+	if err := cleanups[0](); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i < n; i++ {
+		if !exists(filepath.Join(trees[i].Head, "feature.txt")) || !exists(filepath.Join(trees[i].Base, "base.txt")) {
+			t.Errorf("review %d lost its worktrees", i)
+		}
+	}
+	var cwg sync.WaitGroup
+	for i := 1; i < n; i++ {
+		cwg.Add(1)
+		go func() {
+			defer cwg.Done()
+			if err := cleanups[i](); err != nil {
+				t.Errorf("cleanup %d: %v", i, err)
+			}
+		}()
+	}
+	cwg.Wait()
+}
+
+func TestFetchTakesBranchesAsRefs(t *testing.T) {
+	var fetch []string
+	c := Cache{
+		Root: t.TempDir(), CloneURL: "x",
+		Exec: execx.Fake(func(cmd execx.Cmd) (string, string, int) {
+			switch {
+			case len(cmd.Args) > 0 && cmd.Args[0] == "fetch":
+				fetch = cmd.Args
+			case len(cmd.Args) > 0 && cmd.Args[0] == "rev-parse":
+				return "0123456789abcdef0123\n", "", 0
+			}
+			return "", "", 0
+		}),
+	}
+	pr := prb.PR{ID: 1,
+		Source:      prb.Ref{Branch: "--upload-pack=touch /tmp/pwned", Commit: "abc", Repository: "ws/repo"},
+		Destination: prb.Ref{Branch: "-develop", Commit: "def", Repository: "ws/repo"}}
+	_, cleanup, err := c.Prepare(context.Background(), "ws", "repo", pr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	want := []string{"fetch", "--quiet", "origin", "refs/heads/--upload-pack=touch /tmp/pwned", "refs/heads/-develop"}
+	if !slices.Equal(fetch, want) {
+		t.Errorf("fetch args = %q, want %q", fetch, want)
 	}
 }
