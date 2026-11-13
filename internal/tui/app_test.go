@@ -752,6 +752,18 @@ func TestAppBackgroundUnsavedOpensTheResult(t *testing.T) {
 	if strings.Contains(v, "Guardado en") || strings.Contains(v, "No pude abrir el reporte") {
 		t.Errorf("the result was never saved:\n%s", v)
 	}
+
+	// A later review of the PR that fails does not lose that result.
+	d.send(screens.BackMsg{})
+	d.app.s.d.PRB.Exec = func(context.Context, execx.Cmd) error { return errors.New("sin red") }
+	d.send(screens.StartReviewMsg{Row: row477(), Mode: pipeline.ModeLigero})
+	d.send(screens.BackgroundMsg{PR: 477})
+	d.until("the second notification", is[notifiedMsg])
+	d.key("o")
+	d.until("the report again", is[screens.OpenReportMsg])
+	if v := d.view(); !strings.Contains(v, "Aprobar.") || strings.Contains(v, "No pude abrir el reporte") {
+		t.Errorf("the last result was lost to a failed review:\n%s", v)
+	}
 }
 
 // TestAppCancelThenBackground: c and then s; the engine ends with its own

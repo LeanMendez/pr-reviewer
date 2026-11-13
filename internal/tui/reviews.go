@@ -53,7 +53,7 @@ type review struct {
 	cancelled bool // the user cancelled it, from its progress or by quitting
 	events    chan pipeline.Event
 	progress  screens.ProgressModel
-	done      *screens.ReviewDoneMsg // nil while it runs; the last result of the PR after
+	done      *screens.ReviewDoneMsg // nil while it runs
 	doneAt    time.Time
 }
 
@@ -64,12 +64,13 @@ type Reviews struct {
 	base   context.Context
 	run    runFunc
 	buffer int
-	byPR   map[int]*review
+	byPR   map[int]*review // the latest review of each PR
+	last   map[int]*review // the latest one that ended with a result, saved or not
 	wg     sync.WaitGroup
 }
 
 func newReviews(base context.Context, run runFunc) *Reviews {
-	return &Reviews{base: base, run: run, buffer: eventBuffer, byPR: map[int]*review{}}
+	return &Reviews{base: base, run: run, buffer: eventBuffer, byPR: map[int]*review{}, last: map[int]*review{}}
 }
 
 // Start launches the review of row in mode, with its own context. It
@@ -119,20 +120,26 @@ func (r *Reviews) finish(msg screens.ReviewDoneMsg, at time.Time) *review {
 		return nil
 	}
 	rv.done, rv.doneAt = &msg, at
+	if msg.Err == nil {
+		r.last[msg.PR] = rv
+	}
 	return rv
 }
 
+// lastResult returns the latest review of pr that ended with a result, or
+// nil: what o opens, even when the report could not be saved.
+func (r *Reviews) lastResult(pr int) *review { return r.last[pr] }
+
 // mark shows on list the reviews of this session: the ones running, and the
-// ones that ended with a result, saved or not (the router opens it from
-// memory).
+// last result of each PR, saved or not (the router opens it from memory).
 func (r *Reviews) mark(list screens.ListModel) screens.ListModel {
+	for pr, rv := range r.last {
+		list = list.MarkReviewed(pr, rv.doneAt)
+	}
 	var running []int
 	for pr, rv := range r.byPR {
-		switch {
-		case rv.done == nil:
+		if rv.done == nil {
 			running = append(running, pr)
-		case rv.done.Err == nil:
-			list = list.MarkReviewed(pr, rv.doneAt)
 		}
 	}
 	return list.WithRunning(running...)

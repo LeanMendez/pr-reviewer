@@ -261,7 +261,7 @@ func (a App) showResult(res pipeline.Result, rv *review) (App, tea.Cmd) {
 // in memory even when it could not be saved, or else the newest saved
 // report, from the same root the reviews write to.
 func (a App) openReport(msg screens.OpenReportMsg) (App, tea.Cmd) {
-	if rv := a.reviews.get(msg.PR); rv != nil && rv.done != nil && rv.done.Err == nil {
+	if rv := a.reviews.lastResult(msg.PR); rv != nil {
 		return a.showResult(rv.done.Result, rv)
 	}
 	res, savedAt, err := report.LoadLatest(a.s.root, path.Base(msg.Repo), msg.PR)
