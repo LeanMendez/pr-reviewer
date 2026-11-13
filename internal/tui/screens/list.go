@@ -411,7 +411,7 @@ const (
 	numW    = 6
 	authorW = 12
 	linesW  = 4
-	ageW    = 4
+	ageW    = 6 // "12 min", "100 d": the title gives up the columns
 )
 
 func (c columns) titleWidth(width int) int {

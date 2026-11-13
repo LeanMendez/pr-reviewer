@@ -389,6 +389,29 @@ func TestListMarkReviewed(t *testing.T) {
 	}
 }
 
+func TestListAgeColumnFits(t *testing.T) {
+	var calls int
+	m := loaded(t, &calls)
+	m = update(m, RowsLoadedMsg{Ready: []listdata.Row{
+		mkRow(1, "Cinco", "A", 10, 5*time.Minute),
+		mkRow(2, "Doce", "A", 10, 12*time.Minute),
+		mkRow(3, "Tres", "A", 10, 3*time.Hour),
+		mkRow(4, "Cien", "A", 10, 100*24*time.Hour),
+	}})
+	for _, w := range []int{100, 80, 60} {
+		out := tuitest.Plain(m.render(w, 30))
+		for title, want := range map[string]string{"Cinco": "5 min", "Doce": "12 min", "Tres": "3 h", "Cien": "100 d"} {
+			if l := strings.TrimRight(lineWith(out, title), " "); !strings.HasSuffix(l, " "+want) {
+				t.Errorf("width %d: row %s should end with %q: %q", w, title, want, l)
+			}
+		}
+		if hdr := strings.TrimRight(strings.Split(out, "\n")[2], " "); !strings.HasSuffix(hdr, "hace") {
+			t.Errorf("width %d: header %q", w, hdr)
+		}
+		checkWidth(t, m.render(w, 30), w)
+	}
+}
+
 func TestListRunning(t *testing.T) {
 	var calls int
 	m := loaded(t, &calls).WithRunning(477)
