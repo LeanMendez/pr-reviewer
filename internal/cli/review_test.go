@@ -16,6 +16,7 @@ import (
 	"github.com/LeanMendez/pr-review/internal/config"
 	"github.com/LeanMendez/pr-review/internal/execx"
 	"github.com/LeanMendez/pr-review/internal/finding"
+	"github.com/LeanMendez/pr-review/internal/pipeline"
 	"github.com/LeanMendez/pr-review/internal/prb"
 	"github.com/LeanMendez/pr-review/internal/prompts"
 	"github.com/LeanMendez/pr-review/internal/repocache"
@@ -355,5 +356,100 @@ func TestAgentLogsPrivate(t *testing.T) {
 		if st, _ := os.Stat(p); st.Mode().Perm() != want {
 			t.Errorf("%s: mode %v, want %v", p, st.Mode().Perm(), want)
 		}
+	}
+}
+
+func TestReviewDirect(t *testing.T) {
+	h := newHarness(t)
+	events := make(chan pipeline.Event, 256)
+	res, dir, err := Review(context.Background(), h.deps, "stock", 477, pipeline.ModeLigero, events)
+	close(events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(h.reports, "stock", "pr-477-20261112-1030"); dir != want {
+		t.Errorf("dir = %q, want %q", dir, want)
+	}
+	if res.Verdict != finding.VerdictAprobar || res.PR.ID != 477 || res.Repo != "ws/stock" {
+		t.Errorf("result = %+v", res)
+	}
+	for _, f := range []string{"review.md", "findings.json", "context.json", "pr.diff"} {
+		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
+			t.Errorf("%s: %v", f, err)
+		}
+	}
+	var stages int
+	for e := range events {
+		if e.Kind == pipeline.StageDone {
+			stages++
+		}
+	}
+	if stages != 6 {
+		t.Errorf("%d StageDone events, want 6", stages)
+	}
+	if h.out.Len() != 0 || h.errw.Len() != 0 {
+		t.Errorf("Review printed: out=%q err=%q", h.out.String(), h.errw.String())
+	}
+	if h.removed != 2 {
+		t.Errorf("worktrees removed = %d, want 2", h.removed)
+	}
+}
+
+func TestReviewCleanupFailureIsAWarning(t *testing.T) {
+	h := newHarness(t)
+	inner := h.deps.Cache.Exec
+	h.deps.Cache.Exec = func(ctx context.Context, c execx.Cmd) error {
+		if c.Name == "git" && len(c.Args) > 1 && c.Args[0] == "worktree" && c.Args[1] == "remove" {
+			return errors.New("worktree ocupado")
+		}
+		return inner(ctx, c)
+	}
+	res, _, err := Review(context.Background(), h.deps, "stock", 477, pipeline.ModeLigero, nil)
+	var ce *CleanupError
+	if !errors.As(err, &ce) || res.Verdict != finding.VerdictAprobar {
+		t.Fatalf("err = %v (%T), verdict %q: want a *CleanupError with the full result", err, err, res.Verdict)
+	}
+	h.out.Reset()
+	if code, err := h.run(context.Background(), "review", "stock", "477", "--mode", "ligero"); code != 0 {
+		t.Fatalf("code=%d err=%v", code, err)
+	}
+	if !strings.Contains(h.errw.String(), "aviso: no se pudieron borrar los worktrees") || !strings.Contains(h.out.String(), "review.md") {
+		t.Errorf("out=%q err=%q", h.out.String(), h.errw.String())
+	}
+}
+
+func TestVerdictShownWhenReportWriteFails(t *testing.T) {
+	h := newHarness(t)
+	dir := filepath.Join(h.reports, "stock", "pr-477-20261112-1030")
+	// A directory where context.json goes makes report.Write fail.
+	if err := os.MkdirAll(filepath.Join(dir, "context.json"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	code, err := h.run(context.Background(), "review", "stock", "477", "--mode", "ligero")
+	if code != 1 || err == nil || !strings.Contains(err.Error(), "context.json") {
+		t.Fatalf("code=%d err=%v, want 1 and the write error", code, err)
+	}
+	if !strings.Contains(h.out.String(), "**Aprobar.**") {
+		t.Errorf("the verdict must be shown even when the report cannot be written: %q", h.out.String())
+	}
+}
+
+func TestDefaultDepsReportsConfigFound(t *testing.T) {
+	cfgHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", cfgHome)
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	d, err := DefaultDeps()
+	if err != nil || d.ConfigFound {
+		t.Fatalf("no file: found=%v err=%v", d.ConfigFound, err)
+	}
+	p := filepath.Join(cfgHome, "pr-review", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte("workspace: ws\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if d, err = DefaultDeps(); err != nil || !d.ConfigFound || d.Cfg.Workspace != "ws" {
+		t.Fatalf("with file: found=%v workspace=%q err=%v", d.ConfigFound, d.Cfg.Workspace, err)
 	}
 }
