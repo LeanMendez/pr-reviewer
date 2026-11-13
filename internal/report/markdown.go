@@ -76,8 +76,9 @@ func split(fs []finding.Finding) sections {
 }
 
 // VerdictLine is the verdict sentence: the verdict name in bold, the
-// incomplete-review warning when it applies, and the synthesis phrase (or a
-// phrase built from the counts when the synthesis failed).
+// synthesis phrase (or a phrase built from the counts when the synthesis
+// failed) and, whenever the review is incomplete, a clause Go writes after
+// the phrase so no phrase can contradict it.
 func VerdictLine(r pipeline.Result) string {
 	var b strings.Builder
 	name := verdictNames[r.Verdict]
@@ -85,7 +86,8 @@ func VerdictLine(r pipeline.Result) string {
 		name = string(r.Verdict)
 	}
 	fmt.Fprintf(&b, "**%s.**", name)
-	if r.IncompleteWarning {
+	clause := incompleteClause(r)
+	if r.IncompleteWarning && clause == "" {
 		b.WriteString(" Revisión incompleta.")
 	}
 	phrase := oneLine(r.Phrase)
@@ -93,7 +95,42 @@ func VerdictLine(r pipeline.Result) string {
 		phrase = fallbackPhrase(r)
 	}
 	b.WriteString(" " + inline(phrase))
+	if clause != "" {
+		b.WriteString(" " + clause)
+	}
 	return b.String()
+}
+
+// incompleteClause says what the review did not cover, with counts, or ""
+// when it covered everything.
+func incompleteClause(r pipeline.Result) string {
+	failed := map[string]bool{}
+	for _, f := range r.Failures {
+		failed[f.Agent] = true
+	}
+	for _, a := range r.FailedAgents {
+		failed[a] = true
+	}
+	var parts []string
+	switch n := len(failed); {
+	case n == 1:
+		parts = append(parts, "1 agente falló")
+	case n > 1:
+		parts = append(parts, fmt.Sprintf("%d agentes fallaron", n))
+	}
+	switch n := len(r.Unreviewed); {
+	case n == 1:
+		parts = append(parts, "1 archivo sin revisar")
+	case n > 1:
+		parts = append(parts, fmt.Sprintf("%d archivos sin revisar", n))
+	}
+	if len(r.Gaps) > 0 {
+		parts = append(parts, "no se pudo comprobar que el diff esté completo")
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "Revisión incompleta: " + strings.Join(parts, ", ") + "."
 }
 
 // fallbackPhrase says what the counts support when the synthesis agent
@@ -105,7 +142,7 @@ func fallbackPhrase(r pipeline.Result) string {
 			counts[f.Severity]++
 		}
 	}
-	incomplete := len(r.Failures) > 0 || len(r.FailedAgents) > 0 || len(r.Unreviewed) > 0 || len(r.Gaps) > 0
+	incomplete := incompleteClause(r) != ""
 	var lead string
 	switch n := counts[finding.SeverityCritico]; {
 	case n == 1:
@@ -125,12 +162,8 @@ func fallbackPhrase(r pipeline.Result) string {
 			lead = "No hay problemas confirmados que introduzca este PR."
 			if incomplete {
 				lead = "No hay problemas confirmados, pero la revisión quedó incompleta."
-				incomplete = false
 			}
 		}
-	}
-	if incomplete {
-		lead += " La revisión quedó incompleta."
 	}
 	return lead + " La síntesis no está disponible; revisá los hallazgos abajo."
 }
@@ -378,8 +411,14 @@ func code(s string) string {
 	return d + s + d
 }
 
-// inline escapes the backticks of single-line text so they open no span.
-func inline(s string) string { return strings.ReplaceAll(s, "`", "\\`") }
+// inline neutralizes the Markdown of single-line text: backslashes, so none
+// can cancel the escapes, and every character that opens a code span,
+// emphasis, a link or raw HTML. One pass, so nothing is escaped twice.
+func inline(s string) string { return inlineEscaper.Replace(s) }
+
+var inlineEscaper = strings.NewReplacer(
+	`\`, `\\`, "`", "\\`", "*", `\*`, "_", `\_`, "[", `\[`, "]", `\]`, "<", `\<`, ">", `\>`,
+)
 
 // prose cleans free multi-line text: each line loses its indentation, has its
 // backticks escaped and, when it would start a heading, quote, list, rule or

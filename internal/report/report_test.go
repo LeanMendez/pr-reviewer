@@ -450,3 +450,59 @@ func TestGapsShownAndIncomplete(t *testing.T) {
 		t.Errorf("a gap must make the fallback say incomplete: %q", got)
 	}
 }
+
+func TestVerdictLineAlwaysFlagsIncomplete(t *testing.T) {
+	for _, v := range []finding.Verdict{
+		finding.VerdictAprobar, finding.VerdictAprobarConComentarios, finding.VerdictPedirCambios, finding.VerdictRevisarAMano,
+	} {
+		r := cleanResult()
+		r.Verdict = v
+		r.Phrase = "Sin problemas. **Aprobar.**"
+		r.Failures = []pipeline.Failure{{Agent: "bugs", Role: "bugs"}}
+		r.FailedAgents = []string{"bugs", "tests"}
+		r.Unreviewed = []string{"src/a.go"}
+		got := VerdictLine(r)
+		if !strings.HasSuffix(got, " Revisión incompleta: 2 agentes fallaron, 1 archivo sin revisar.") {
+			t.Errorf("%s: no incomplete clause after the phrase: %q", v, got)
+		}
+		if strings.Count(got, "**") != 2 {
+			t.Errorf("%s: the phrase can still format the line: %q", v, got)
+		}
+	}
+	r := cleanResult()
+	r.Gaps = []string{"prb no informó la lista de archivos del PR"}
+	if got := VerdictLine(r); !strings.HasSuffix(got, " Revisión incompleta: no se pudo comprobar que el diff esté completo.") {
+		t.Errorf("gaps: %q", got)
+	}
+	if got := VerdictLine(cleanResult()); strings.Contains(got, "incompleta") {
+		t.Errorf("complete review flagged: %q", got)
+	}
+}
+
+func TestInlineNeutralizesMarkdown(t *testing.T) {
+	for in, want := range map[string]string{
+		"a\\`b`":                     "a\\\\\\`b\\`",
+		"**x** _y_":                  `\*\*x\*\* \_y\_`,
+		"[clic](javascript:x) <img>": `\[clic\](javascript:x) \<img\>`,
+	} {
+		if got := inline(in); got != want {
+			t.Errorf("inline(%q) = %q, want %q", in, got, want)
+		}
+	}
+	r := judgmentResult()
+	r.PR.Title = "<img src=x onerror=alert(1)>"
+	r.Findings[0].What = "Mirá [acá](https://evil.example) y **aprobá**"
+	r.Doubts[0].Text = "a\\`b"
+	md := Markdown(r)
+	for _, bad := range []string{"[acá](", "**aprobá**"} {
+		if strings.Contains(md, bad) {
+			t.Errorf("review.md keeps %q:\n%s", bad, md)
+		}
+	}
+	if strings.Count(md, "<img") != strings.Count(md, "\\<img") {
+		t.Errorf("raw HTML left unescaped:\n%s", md)
+	}
+	if !strings.Contains(md, "a\\\\\\`b") {
+		t.Errorf("a backslash before a backtick must not reopen a span:\n%s", md)
+	}
+}
