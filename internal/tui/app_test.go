@@ -396,6 +396,9 @@ func TestAppOnboardingThenList(t *testing.T) {
 		case c.Name == "prb" && len(c.Args) > 1 && c.Args[1] == "list":
 			_, _ = c.Stdout.Write([]byte(`[]`))
 			return nil
+		case c.Name == "claude" && len(c.Args) > 0 && c.Args[0] == "auth":
+			_, _ = c.Stdout.Write([]byte(`{"loggedIn":true}`))
+			return nil
 		case c.Name == "claude":
 			_, _ = c.Stdout.Write([]byte("2.1.0 (Claude Code)\n"))
 			return nil

@@ -3,6 +3,7 @@ package screens
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -16,16 +17,32 @@ import (
 
 const authJSON = `{"authenticated":true,"user":"Lean","account_id":"1","default_workspace":"acme"}`
 
+// claudeLoggedIn and claudeLoggedOut are what `claude auth status --json`
+// prints, with exit codes 0 and 1.
+const (
+	claudeLoggedIn  = `{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty"}`
+	claudeLoggedOut = `{"loggedIn":false,"authMethod":"none","apiProvider":"firstParty"}`
+)
+
 type obFake struct {
 	prbOut, prbErr string
 	prbCode        int
 	claudeOut      string
 	claudeMissing  bool
 	claudeCode     int
+	// claude auth status --json; "" means logged in.
+	claudeAuthOut  string
+	claudeAuthCode int
 }
 
 func (f obFake) exec() execx.Exec {
 	inner := execx.Fake(func(c execx.Cmd) (string, string, int) {
+		if c.Name == "claude" && slices.Equal(c.Args, []string{"auth", "status", "--json"}) {
+			if f.claudeAuthOut == "" {
+				return claudeLoggedIn, "", 0
+			}
+			return f.claudeAuthOut, "", f.claudeAuthCode
+		}
 		if c.Name == "claude" {
 			return f.claudeOut, "", f.claudeCode
 		}
@@ -114,9 +131,59 @@ func TestOnboardingOneToolMissingBlocks(t *testing.T) {
 	}
 }
 
+func TestOnboardingClaudeWithoutSession(t *testing.T) {
+	f := obFake{prbOut: authJSON, claudeOut: "2.1.0 (Claude Code)\n", claudeAuthOut: claudeLoggedOut, claudeAuthCode: 1}
+	m := newOnboarding(f, nil)
+	tm, _ := drive(m, m.Init()())
+	out := view(tm)
+	for _, want := range []string{
+		"prb: sesión iniciada como Lean", "Claude Code: 2.1.0 (Claude Code)",
+		"Claude Code no tiene sesión.", "Corré claude y iniciá sesión, después apretá r.",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "enter seguir") {
+		t.Errorf("offers to go on without a Claude session:\n%s", out)
+	}
+	tm, _ = drive(tm, tuitest.Key("enter"))
+	if out := view(tm); !strings.Contains(out, "paso 1 de 3") {
+		t.Errorf("advanced without a Claude session:\n%s", out)
+	}
+
+	// after logging in, r finds the session
+	om := tm.(OnboardingModel)
+	f.claudeAuthOut, f.claudeAuthCode = "", 0
+	om.deps.Exec = f.exec()
+	tm, _ = drive(om, tuitest.Key("r"))
+	if out := view(tm); strings.Contains(out, "no tiene sesión") || !strings.Contains(out, "enter seguir") {
+		t.Errorf("after r:\n%s", out)
+	}
+}
+
+func TestOnboardingClaudeSessionUnknown(t *testing.T) {
+	f := obFake{prbOut: authJSON, claudeOut: "2.1.0 (Claude Code)\n", claudeAuthOut: "error: unknown command 'auth'", claudeAuthCode: 1}
+	m := newOnboarding(f, nil)
+	tm, _ := drive(m, m.Init()())
+	out := view(tm)
+	for _, want := range []string{"Claude Code: 2.1.0 (Claude Code)", "Claude Code: no pude comprobar la sesión."} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	tm, _ = drive(tm, tuitest.Key("enter"))
+	if out := view(tm); !strings.Contains(out, "paso 1 de 3") {
+		t.Errorf("advanced without knowing the Claude session:\n%s", out)
+	}
+}
+
 func TestOnboardingRetry(t *testing.T) {
 	calls := 0
 	e := execx.Fake(func(c execx.Cmd) (string, string, int) {
+		if c.Name == "claude" && len(c.Args) > 0 && c.Args[0] == "auth" {
+			return claudeLoggedIn, "", 0
+		}
 		if c.Name == "claude" {
 			return "2.1.0", "", 0
 		}

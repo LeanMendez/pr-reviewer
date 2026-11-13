@@ -3,6 +3,7 @@ package screens
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -39,6 +40,10 @@ type toolsCheckedMsg struct {
 	authErr   error
 	version   string
 	claudeErr error
+	// The Claude Code session, checked when claude runs: loggedIn, or the
+	// error that kept it from being known.
+	loggedIn   bool
+	sessionErr error
 }
 
 type onboardingStep int
@@ -83,8 +88,8 @@ func NewOnboarding(deps OnboardingDeps) OnboardingModel {
 // Init starts the tool checks.
 func (m OnboardingModel) Init() tea.Cmd { return m.checkTools() }
 
-// checkTools runs `prb auth status` and `claude --version` off the Update
-// loop, each with its own timeout.
+// checkTools runs `prb auth status`, `claude --version` and, when claude
+// runs, `claude auth status` off the Update loop, each with its own timeout.
 func (m OnboardingModel) checkTools() tea.Cmd {
 	deps := m.deps
 	return func() tea.Msg {
@@ -94,22 +99,48 @@ func (m OnboardingModel) checkTools() tea.Cmd {
 		cancel()
 
 		ctx, cancel = context.WithTimeout(context.Background(), toolCheckTimeout)
-		defer cancel()
 		var buf bytes.Buffer
 		out.claudeErr = deps.Exec(ctx, execx.Cmd{Name: "claude", Args: []string{"--version"}, Stdout: &buf})
-		if out.claudeErr == nil {
-			first, _, _ := strings.Cut(strings.TrimSpace(buf.String()), "\n")
-			out.version = strings.TrimSpace(clean(first))
+		cancel()
+		if out.claudeErr != nil {
+			return out
 		}
+		first, _, _ := strings.Cut(strings.TrimSpace(buf.String()), "\n")
+		out.version = strings.TrimSpace(clean(first))
+
+		ctx, cancel = context.WithTimeout(context.Background(), toolCheckTimeout)
+		defer cancel()
+		out.loggedIn, out.sessionErr = claudeSession(ctx, deps.Exec)
 		return out
 	}
+}
+
+// claudeSession asks `claude auth status --json` whether Claude Code has a
+// session. Without one it exits 1, and its JSON says so too.
+func claudeSession(ctx context.Context, ex execx.Exec) (bool, error) {
+	var buf bytes.Buffer
+	err := ex(ctx, execx.Cmd{Name: "claude", Args: []string{"auth", "status", "--json"}, Stdout: &buf})
+	var ee *execx.ExitError
+	if err != nil && !errors.As(err, &ee) {
+		return false, err
+	}
+	var st struct {
+		LoggedIn *bool `json:"loggedIn"`
+	}
+	if json.Unmarshal(buf.Bytes(), &st) != nil || st.LoggedIn == nil {
+		if err != nil {
+			return false, err
+		}
+		return false, errors.New("claude auth status no dijo si hay sesión")
+	}
+	return *st.LoggedIn, nil
 }
 
 func (m OnboardingModel) authOK() bool {
 	return m.checked.authErr == nil && m.checked.identity.Authenticated
 }
 func (m OnboardingModel) claudeOK() bool {
-	return m.checked.claudeErr == nil
+	return m.checked.claudeErr == nil && m.checked.sessionErr == nil && m.checked.loggedIn
 }
 func (m OnboardingModel) toolsOK() bool { return !m.checking && m.authOK() && m.claudeOK() }
 
@@ -314,14 +345,26 @@ func (m OnboardingModel) authLines() []string {
 }
 
 func (m OnboardingModel) claudeLines() []string {
-	if m.claudeOK() {
+	warn := theme.Accent.Render("  ✗ ")
+	if m.checked.claudeErr == nil {
 		v := m.checked.version
 		if v == "" {
 			v = "instalado"
 		}
-		return []string{theme.OK.Render("  ✓ ") + theme.Text.Render("Claude Code: "+v)}
+		lines := []string{theme.OK.Render("  ✓ ") + theme.Text.Render("Claude Code: "+v)}
+		switch {
+		case m.checked.sessionErr != nil:
+			lines = append(lines,
+				warn+theme.Text.Render("Claude Code: no pude comprobar la sesión."),
+				theme.Dim.Render("    "+clean(m.checked.sessionErr.Error())),
+				theme.Dim.Render("    Revisá que Claude Code esté actualizado y apretá r."))
+		case !m.checked.loggedIn:
+			lines = append(lines,
+				warn+theme.Text.Render("Claude Code no tiene sesión."),
+				theme.Dim.Render("    Corré claude y iniciá sesión, después apretá r."))
+		}
+		return lines
 	}
-	warn := theme.Accent.Render("  ✗ ")
 	var ee *execx.ExitError
 	if errors.As(m.checked.claudeErr, &ee) {
 		return []string{
