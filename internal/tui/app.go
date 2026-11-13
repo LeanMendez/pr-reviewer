@@ -86,6 +86,8 @@ type App struct {
 	quitting   bool // waiting for the cancelled reviews to end
 	forced     bool // quit with ctrl+c without waiting for the cleanup
 
+	themeNote string // an unknown theme in the config, said once by the list
+
 	width, height int
 }
 
@@ -108,6 +110,9 @@ func newApp(ctx context.Context, d app.Deps, s sys.System, start Start) App {
 	a.reviews = newReviews(ctx, func(ctx context.Context, row listdata.Row, mode pipeline.Mode, events chan<- pipeline.Event) tea.Cmd {
 		return ReviewCmd(ctx, sess.d, sess.repo, row, mode, events)
 	})
+	th, note := themeFor(d.Cfg)
+	theme.Use(th)
+	a.themeNote = note
 	switch {
 	case !d.ConfigFound:
 		a, _ = a.openOnboarding()
@@ -119,6 +124,20 @@ func newApp(ctx context.Context, d app.Deps, s sys.System, start Start) App {
 		a, _ = a.openList(start.Repo)
 	}
 	return a
+}
+
+// themeFor returns the theme the config asks for. An empty name is the
+// default; an unknown one is too, with a note that says so.
+func themeFor(cfg config.Config) (theme.Theme, string) {
+	if cfg.Tema == "" {
+		t, _ := theme.ByName(theme.DefaultName)
+		return t, ""
+	}
+	if t, ok := theme.ByName(cfg.Tema); ok {
+		return t, ""
+	}
+	t, _ := theme.ByName(theme.DefaultName)
+	return t, fmt.Sprintf("No conozco el tema %s; uso %s.", cfg.Tema, theme.DefaultName)
 }
 
 // Run opens the interface in the alternate screen and returns when the user
@@ -172,16 +191,24 @@ func (a App) Init() tea.Cmd {
 // help) becomes the question or the wait.
 func (a App) View() tea.View {
 	v := a.active().View()
+	v.Content = a.withStatusLine(v.Content)
+	v.Content = theme.Fill(v.Content, a.width, a.height)
+	v.AltScreen = true
+	return v
+}
+
+// withStatusLine replaces the last line of content with the quit question or
+// the wait, when there is one.
+func (a App) withStatusLine(content string) string {
 	const force = "  ctrl+c sale ya, sin esperar la limpieza"
 	n := a.reviews.Running()
 	switch {
 	case a.confirming:
-		v.Content = withStatus(v.Content, a.width, fmt.Sprintf("Hay %s en curso. ¿Salir igual? (s/n)", reviewsText(n))+force)
+		return withStatus(content, a.width, fmt.Sprintf("Hay %s en curso. ¿Salir igual? (s/n)", reviewsText(n))+force)
 	case a.quitting:
-		v.Content = withStatus(v.Content, a.width, fmt.Sprintf("Cancelando %s en curso…", reviewsText(n))+force)
+		return withStatus(content, a.width, fmt.Sprintf("Cancelando %s en curso…", reviewsText(n))+force)
 	}
-	v.AltScreen = true
-	return v
+	return content
 }
 
 func reviewsText(n int) string {

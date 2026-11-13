@@ -24,6 +24,7 @@ import (
 	"github.com/LeanMendez/pr-review/internal/tui/listdata"
 	"github.com/LeanMendez/pr-review/internal/tui/screens"
 	"github.com/LeanMendez/pr-review/internal/tui/sys"
+	"github.com/LeanMendez/pr-review/internal/tui/theme"
 	"github.com/LeanMendez/pr-review/internal/tui/tuitest"
 )
 
@@ -865,5 +866,153 @@ func TestAppQuitTwoReviews(t *testing.T) {
 	d.until("quit", is[tea.QuitMsg])
 	if got := n.all(); len(got) != 0 {
 		t.Errorf("quitting notified: %q", got)
+	}
+}
+
+// useDefaultThemeAfter restores the default theme once the test ends.
+func useDefaultThemeAfter(t *testing.T) {
+	t.Helper()
+	t.Cleanup(func() {
+		def, _ := theme.ByName(theme.DefaultName)
+		theme.Use(def)
+	})
+}
+
+func TestAppAppliesConfiguredTheme(t *testing.T) {
+	useDefaultThemeAfter(t)
+	h := harness(t)
+	h.Deps.Cfg.Tema = "claude-code"
+	NewApp(h.Deps, fakeSys(&notes{}), "ws/stock")
+	if got := theme.Current().Name; got != "claude-code" {
+		t.Fatalf("theme = %q, want claude-code", got)
+	}
+}
+
+func TestThemeFor(t *testing.T) {
+	cfg := config.Defaults()
+	if th, note := themeFor(cfg); th.Name != theme.DefaultName || note != "" {
+		t.Errorf("empty: %q, %q", th.Name, note)
+	}
+	cfg.Tema = "noir"
+	if th, note := themeFor(cfg); th.Name != "noir" || note != "" {
+		t.Errorf("known: %q, %q", th.Name, note)
+	}
+	cfg.Tema = "vaporwave"
+	if th, note := themeFor(cfg); th.Name != theme.DefaultName || note != "No conozco el tema vaporwave; uso pr-review." {
+		t.Errorf("unknown: %q, %q", th.Name, note)
+	}
+}
+
+func TestAppUnknownThemeNote(t *testing.T) {
+	useDefaultThemeAfter(t)
+	cfgHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", cfgHome)
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	p := filepath.Join(cfgHome, "pr-review", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte("workspace: ws\ntema: vaporwave\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	deps, err := app.DefaultDeps()
+	if err != nil {
+		t.Fatal(err)
+	}
+	deps.Exec = execx.Fake(func(execx.Cmd) (string, string, int) { return "", "", 1 })
+	d := newDriver(t, NewApp(deps, fakeSys(&notes{}), "ws/stock"))
+	d.send(tea.WindowSizeMsg{Width: 120, Height: 40})
+	if got := theme.Current().Name; got != theme.DefaultName {
+		t.Errorf("theme = %q, want the default", got)
+	}
+	const note = "No conozco el tema vaporwave; uso pr-review."
+	d.send(screens.RowsLoadedMsg{Ready: []listdata.Row{row477()}})
+	if v := d.view(); !strings.Contains(v, note) {
+		t.Fatalf("the load erased the note:\n%s", v)
+	}
+
+	// Saving the models keeps the text of the theme.
+	d.key("m")
+	d.until("the models", is[screens.OpenModelsMsg])
+	d.key("g")
+	d.until("the save", is[screens.ModelsSavedMsg])
+	data, _ := os.ReadFile(p)
+	if !strings.Contains(string(data), "tema: vaporwave") {
+		t.Errorf("tema was not kept:\n%s", data)
+	}
+}
+
+func TestAppViewFillsWholeScreen(t *testing.T) {
+	const w, h = 100, 30
+	for _, name := range []string{"claude-code", "sensei"} {
+		th, ok := theme.ByName(name)
+		if !ok {
+			t.Fatal(name)
+		}
+		check := func(t *testing.T, view, where string) {
+			t.Helper()
+			lines := strings.Split(view, "\n")
+			if len(lines) != h {
+				t.Errorf("%s/%s: %d lines, want %d", name, where, len(lines), h)
+			}
+			want := strings.ToUpper(th.BG)
+			for y, l := range lines {
+				cells := tuitest.Cells(l)
+				width := 0
+				for x, c := range cells {
+					width += c.Width
+					if c.BG != want {
+						t.Fatalf("%s/%s: line %d cell %d %q has background %q, want %s", name, where, y, x, c.Text, c.BG, want)
+					}
+					if c.FG == "" && strings.TrimSpace(c.Text) != "" {
+						t.Fatalf("%s/%s: line %d cell %d %q has the default foreground", name, where, y, x, c.Text)
+					}
+				}
+				if width != w {
+					t.Fatalf("%s/%s: line %d is %d cells, want %d", name, where, y, width, w)
+				}
+			}
+		}
+		t.Run(name, func(t *testing.T) {
+			useDefaultThemeAfter(t)
+			hh := harness(t)
+			hh.Deps.Cfg.Tema = name
+			d := newDriver(t, NewApp(hh.Deps, fakeSys(&notes{}), "ws/stock"))
+			d.send(tea.WindowSizeMsg{Width: w, Height: h})
+			d.send(screens.RowsLoadedMsg{Ready: []listdata.Row{row477(), row88()}})
+			check(t, d.app.View().Content, "list")
+
+			d.app.confirming = true
+			check(t, d.app.View().Content, "quit")
+
+			hh2 := harness(t)
+			hh2.Deps.Cfg.Tema = name
+			hh2.Deps.ConfigFound = false
+			inner := hh2.Deps.Exec
+			ex := func(ctx context.Context, c execx.Cmd) error {
+				switch {
+				case c.Name == "prb":
+					_, _ = c.Stdout.Write([]byte(`{"authenticated":true,"user":"leanm","default_workspace":"otro"}`))
+					return nil
+				case c.Name == "claude" && len(c.Args) > 0 && c.Args[0] == "auth":
+					_, _ = c.Stdout.Write([]byte(`{"loggedIn":true}`))
+					return nil
+				case c.Name == "claude":
+					_, _ = c.Stdout.Write([]byte("2.1.0 (Claude Code)\n"))
+					return nil
+				}
+				return inner(ctx, c)
+			}
+			hh2.Deps.Exec, hh2.Deps.PRB.Exec = ex, ex
+			o := newDriver(t, NewApp(hh2.Deps, fakeSys(&notes{}), "stock"))
+			o.send(tea.WindowSizeMsg{Width: w, Height: h})
+			o.run(o.app.Init())
+			o.until("the tools check", func(tea.Msg) bool { return strings.Contains(o.view(), "Claude Code: 2.1.0") })
+			o.key("enter")
+			if v := o.view(); !strings.Contains(v, "workspace") {
+				t.Fatalf("workspace step not shown:\n%s", v)
+			}
+			check(t, o.app.View().Content, "onboarding")
+		})
 	}
 }

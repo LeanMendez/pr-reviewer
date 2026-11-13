@@ -7,6 +7,10 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
+// fillParser is reused by every Fill: like the theme variables, Fill only runs
+// on the Bubble Tea goroutine (or in tests), so one parser is enough.
+var fillParser = ansi.NewParser()
+
 // Fill paints the active theme background on every cell of a screen. Each
 // line, measured in visible cells, is cut or padded with background spaces to
 // exactly width; background lines are added up to height; and the background
@@ -20,7 +24,7 @@ func Fill(content string, width, height int) string {
 	for len(lines) < height {
 		lines = append(lines, "")
 	}
-	p := ansi.NewParser()
+	p := fillParser
 	var b strings.Builder
 	for i, l := range lines {
 		if i > 0 {

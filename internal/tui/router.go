@@ -156,6 +156,9 @@ func (a App) openPicker() (App, tea.Cmd) {
 func (a App) openList(repo string) (App, tea.Cmd) {
 	a.s.repo = repo
 	a.list = a.reviews.mark(screens.NewList(repo, a.loadRows(repo)).WithThreshold(a.s.d.Cfg.Thresholds.MaxLines))
+	if a.themeNote != "" {
+		a.list, a.themeNote = a.list.WithNote(a.themeNote), ""
+	}
 	return a.show(scrList, a.list.Init())
 }
 
