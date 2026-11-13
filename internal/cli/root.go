@@ -9,6 +9,8 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+
+	"github.com/LeanMendez/pr-review/internal/app"
 )
 
 // version se pisa en el build con -ldflags si hace falta.
@@ -61,9 +63,9 @@ func handleError(err error, w io.Writer) int {
 }
 
 // NewRootCmd arma el comando raíz de pr-review con las dependencias reales.
-func NewRootCmd(version string) *cobra.Command { return newRootCmd(version, DefaultDeps) }
+func NewRootCmd(version string) *cobra.Command { return newRootCmd(version, app.DefaultDeps) }
 
-func newRootCmd(version string, deps func() (Deps, error)) *cobra.Command {
+func newRootCmd(version string, deps func() (app.Deps, error)) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "pr-review",
 		Short:         "Revisa PRs de Bitbucket con varios agentes de Claude",
