@@ -90,3 +90,34 @@ func TestResolveRepo(t *testing.T) {
 		t.Errorf("env: %q %v", got, err)
 	}
 }
+
+func TestWorkspace(t *testing.T) {
+	t.Setenv("BITBUCKET_WORKSPACE", "")
+	if ws, err := app.Workspace("ws"); err != nil || ws != "ws" {
+		t.Errorf("configured: %q %v", ws, err)
+	}
+	if _, err := app.Workspace(""); err == nil || err.Error() != "Falta el workspace: configuralo con pr-review o pasá workspace/repo." {
+		t.Errorf("missing: err = %v", err)
+	}
+	t.Setenv("BITBUCKET_WORKSPACE", "envws")
+	if ws, err := app.Workspace(""); err != nil || ws != "envws" {
+		t.Errorf("env: %q %v", ws, err)
+	}
+}
+
+func TestReportsRoot(t *testing.T) {
+	h := apptest.New(t)
+	if got := app.ReportsRoot(h.Deps); got != h.Reports {
+		t.Errorf("configured: %q, want %q", got, h.Reports)
+	}
+	h.Deps.Cfg.ReportsDir = ""
+	h.Deps.Exec = execx.Fake(func(c execx.Cmd) (string, string, int) {
+		if c.Name == "xdg-user-dir" {
+			return "/home/x/Docs\n", "", 0
+		}
+		return "", "", 1
+	})
+	if got := app.ReportsRoot(h.Deps); got != "/home/x/Docs/reviews" {
+		t.Errorf("from xdg-user-dir: %q", got)
+	}
+}

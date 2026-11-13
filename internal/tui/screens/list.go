@@ -4,6 +4,7 @@ package screens
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -67,6 +68,7 @@ type ListModel struct {
 	filter      string
 	filtering   bool
 	threshold   int
+	note        string // shown until the next key
 
 	width, height int
 	now           func() time.Time
@@ -83,6 +85,28 @@ func (m ListModel) WithThreshold(lines int) ListModel {
 	if lines > 0 {
 		m.threshold = lines
 	}
+	return m
+}
+
+// MarkReviewed records that a review of pr finished at at, so its row
+// shows it and offers the report without reloading the list.
+func (m ListModel) MarkReviewed(pr int, at time.Time) ListModel {
+	mark := func(rows []listdata.Row) []listdata.Row {
+		out := slices.Clone(rows)
+		for i := range out {
+			if out[i].Ctx.PullRequest.ID == pr {
+				out[i].Reviewed, out[i].LastReview = true, at
+			}
+		}
+		return out
+	}
+	m.ready, m.hidden = mark(m.ready), mark(m.hidden)
+	return m
+}
+
+// WithNote shows note below the table until the next key.
+func (m ListModel) WithNote(note string) ListModel {
+	m.note = clean(note)
 	return m
 }
 
@@ -118,6 +142,7 @@ func (m ListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m ListModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	m.note = ""
 	k := msg.String()
 	if k == "ctrl+c" {
 		return m, emit(QuitMsg{})
@@ -361,6 +386,9 @@ func (m ListModel) body(width, height int) []string {
 }
 
 func (m ListModel) filterLine() string {
+	if m.note != "" {
+		return theme.Accent.Render(" " + m.note)
+	}
 	if m.filtering {
 		return theme.Strong.Render(" /") + theme.Text.Render(" "+m.filter) + theme.Accent.Render("▏")
 	}

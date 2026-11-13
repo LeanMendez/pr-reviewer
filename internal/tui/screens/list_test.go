@@ -370,3 +370,37 @@ func TestListKeyHelpFits(t *testing.T) {
 		t.Errorf("m modelos missing at 112:\n%s", out)
 	}
 }
+
+func TestListMarkReviewed(t *testing.T) {
+	var calls int
+	m := loaded(t, &calls)
+	m = m.MarkReviewed(477, now)
+	out := tuitest.Plain(m.render(100, 30))
+	if !strings.Contains(out, "pr-review lo revisó hace 1 min") || !strings.Contains(out, "o abrir el último reporte") {
+		t.Errorf("477 not marked:\n%s", out)
+	}
+	_, msg := send(m, tuitest.Key("o"))
+	if rep, ok := msg.(OpenReportMsg); !ok || rep.PR != 477 {
+		t.Errorf("o msg = %#v", msg)
+	}
+	m = update(m, tuitest.Key("down"))
+	if out := tuitest.Plain(m.render(100, 30)); !strings.Contains(out, "nunca lo revisó") {
+		t.Errorf("88 should stay unreviewed:\n%s", out)
+	}
+}
+
+func TestListWithNote(t *testing.T) {
+	var calls int
+	m := loaded(t, &calls).WithNote("No pude abrir el reporte: roto")
+	out := tuitest.Plain(m.render(100, 30))
+	if !strings.Contains(out, "No pude abrir el reporte: roto") {
+		t.Errorf("note not shown:\n%s", out)
+	}
+	if n := len(strings.Split(out, "\n")); n != 30 {
+		t.Errorf("render has %d lines, want 30", n)
+	}
+	m = update(m, tuitest.Key("down"))
+	if out := tuitest.Plain(m.render(100, 30)); strings.Contains(out, "No pude abrir") {
+		t.Errorf("the note should go away on the next key:\n%s", out)
+	}
+}

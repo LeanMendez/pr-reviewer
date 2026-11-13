@@ -573,3 +573,15 @@ func TestReportPageKeysReachTheEnd(t *testing.T) {
 		t.Fatalf("cursor item not back in view after moving:\n%s", out)
 	}
 }
+
+func TestReportWithNote(t *testing.T) {
+	m, _ := newReport(reportResult())
+	m = m.WithNote("Aviso: no se pudieron borrar los worktrees: ocupado")
+	if out := rplain(m); !strings.Contains(out, "Aviso: no se pudieron borrar los worktrees: ocupado") {
+		t.Errorf("note not shown:\n%s", out)
+	}
+	m, _ = rkey(m, "down")
+	if out := rplain(m); strings.Contains(out, "Aviso:") {
+		t.Errorf("the note should go away on the next key:\n%s", out)
+	}
+}

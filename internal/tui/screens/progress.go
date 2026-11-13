@@ -20,10 +20,16 @@ import (
 // EventMsg wraps a pipeline event delivered to the screen.
 type EventMsg pipeline.Event
 
-// ReviewDoneMsg ends the review: the router sends it when pipeline.Run returns.
+// ReviewDoneMsg ends the review of PR: the router sends it when the review
+// returns. Dir is the report dir, empty when no report was written; Warning
+// is a problem that did not stop the review (worktrees left behind, a report
+// that could not be saved).
 type ReviewDoneMsg struct {
-	Result pipeline.Result
-	Err    error
+	PR      int
+	Result  pipeline.Result
+	Dir     string
+	Err     error
+	Warning error
 }
 
 // BackgroundMsg asks the router to keep reviewing PR in the background.
@@ -94,7 +100,8 @@ type ProgressModel struct {
 }
 
 // NewProgress builds the screen for row; events is the channel the review
-// writes to and cancel stops it.
+// writes to (nil when the caller delivers each event as an EventMsg) and
+// cancel stops it.
 func NewProgress(row listdata.Row, mode pipeline.Mode, events <-chan pipeline.Event, cancel context.CancelFunc) ProgressModel {
 	return ProgressModel{
 		row: row, mode: mode, events: events, cancel: cancel,
@@ -109,8 +116,12 @@ func (m ProgressModel) WithClock(now func() time.Time) ProgressModel {
 }
 
 // waitEvent waits for the next event of ch and delivers it as an EventMsg.
-// A closed channel yields no message.
+// A closed channel yields no message; a nil one, no command: the router
+// reads the events and delivers them itself.
 func waitEvent(ch <-chan pipeline.Event) tea.Cmd {
+	if ch == nil {
+		return nil
+	}
 	return func() tea.Msg {
 		ev, ok := <-ch
 		if !ok {

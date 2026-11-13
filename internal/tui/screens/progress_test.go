@@ -347,3 +347,16 @@ func TestProgressValidatorShowsCandidate(t *testing.T) {
 		}
 	}
 }
+
+// TestProgressWithoutChannel: the router reads the review's events and
+// delivers them, so the screen must not wait on a channel of its own.
+func TestProgressWithoutChannel(t *testing.T) {
+	m := NewProgress(listdata.Row{}, pipeline.ModeLigero, nil, nil)
+	next, cmd := m.Update(EventMsg(pipeline.Event{Kind: pipeline.StageStarted, Stage: pipeline.StagePrechecks}))
+	if cmd != nil {
+		t.Error("an event must not start waiting on a nil channel")
+	}
+	if out := plain(next.(ProgressModel)); !strings.Contains(out, "Va 0 de") {
+		t.Errorf("event not applied:\n%s", out)
+	}
+}

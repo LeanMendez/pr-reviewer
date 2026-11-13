@@ -19,19 +19,39 @@ import (
 	"github.com/LeanMendez/pr-review/internal/report"
 )
 
+// Workspace is the configured workspace, or BITBUCKET_WORKSPACE when there
+// is none.
+func Workspace(configured string) (string, error) {
+	if configured == "" {
+		configured = os.Getenv("BITBUCKET_WORKSPACE")
+	}
+	if configured == "" {
+		return "", errors.New("Falta el workspace: configuralo con pr-review o pasá workspace/repo.")
+	}
+	return configured, nil
+}
+
 // ResolveRepo returns the "workspace/repo" form of arg. A bare repo name takes
 // workspace, or BITBUCKET_WORKSPACE when workspace is empty.
 func ResolveRepo(arg, workspace string) (string, error) {
 	if strings.Contains(arg, "/") {
 		return arg, nil
 	}
-	if workspace == "" {
-		workspace = os.Getenv("BITBUCKET_WORKSPACE")
+	ws, err := Workspace(workspace)
+	if err != nil {
+		return "", err
 	}
-	if workspace == "" {
-		return "", errors.New("Falta el workspace: configuralo con pr-review o pasá workspace/repo.")
+	return ws + "/" + arg, nil
+}
+
+// ReportsRoot is where the reviews are saved: the configured dir, or
+// <DOCUMENTS>/reviews. Everything that reads reports uses it, so the list
+// and the reviews agree.
+func ReportsRoot(d Deps) string {
+	if d.Cfg.ReportsDir != "" {
+		return d.Cfg.ReportsDir
 	}
-	return workspace + "/" + arg, nil
+	return report.ReportsRoot(d.Exec)
 }
 
 // CleanupError is a review that finished, with its report written, whose
@@ -64,11 +84,7 @@ func Review(ctx context.Context, d Deps, repo string, n int, mode pipeline.Mode,
 	if now == nil {
 		now = time.Now
 	}
-	root := d.Cfg.ReportsDir
-	if root == "" {
-		root = report.ReportsRoot(d.Exec)
-	}
-	dir = report.Dir(root, name, n, now())
+	dir = report.Dir(ReportsRoot(d), name, n, now())
 
 	// The agents read the user's prompt overrides and log under the report.
 	prompts.SetOverrideDir(d.ConfigDir)

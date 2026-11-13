@@ -60,6 +60,13 @@ func NewReport(r pipeline.Result, s sys.System, savedAt string) ReportModel {
 	return ReportModel{res: r, sys: s, savedAt: savedAt, secs: report.Split(r.Findings)}
 }
 
+// WithNote shows note in the status line until the next key, e.g. a warning
+// from the review that produced the report.
+func (m ReportModel) WithNote(note string) ReportModel {
+	m.note = clean(note)
+	return m
+}
+
 // Init does nothing: the report is already complete.
 func (m ReportModel) Init() tea.Cmd { return nil }
 
