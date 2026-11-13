@@ -42,6 +42,14 @@ func TestDetectRepo(t *testing.T) {
 		"https://bitbucket.org/ws":                "",
 		"https://bitbucket.org/ws/repo/extra":     "",
 		"git@bitbucket.org:/repo.git":             "",
+		"https://bitbucket.org/ws/..":             "",
+		"https://bitbucket.org/../repo":           "",
+		"git@bitbucket.org:ws/...git":             "",
+		"git@bitbucket.org:ws/.":                  "",
+		"git@bitbucket.org:ws/re\x1bpo.git":       "",
+		"git@bitbucket.org:w s/repo.git":          "",
+		"git@bitbucket.org:ws/repo;rm.git":        "",
+		"git@bitbucket.org:Equipo_1/api.v2-x.git": "Equipo_1/api.v2-x",
 	} {
 		var dir string
 		got, ok := DetectRepo(gitOrigin(url, &dir), "/src/repo")

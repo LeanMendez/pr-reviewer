@@ -102,8 +102,23 @@ func bitbucketRepo(remote string) (string, bool) {
 	}
 	p = strings.TrimSuffix(strings.TrimSuffix(p, "/"), ".git")
 	ws, repo, ok := strings.Cut(p, "/")
-	if !ok || ws == "" || repo == "" || strings.Contains(repo, "/") {
+	if !ok || !validName(ws) || !validName(repo) {
 		return "", false
 	}
 	return ws + "/" + repo, true
+}
+
+// validName is a Bitbucket workspace or repo slug: letters, digits, '.',
+// '_' and '-', never "." or "..". Anything else is not a repo to open.
+func validName(s string) bool {
+	if s == "" || s == "." || s == ".." {
+		return false
+	}
+	for _, r := range s {
+		ok := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '_' || r == '-'
+		if !ok {
+			return false
+		}
+	}
+	return true
 }
