@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -1155,4 +1156,45 @@ func TestAppThemeSwitchWithBackgroundReview(t *testing.T) {
 
 	close(release)
 	d.until("the report", is[screens.OpenResultMsg])
+}
+
+// TestAppThemePickerIgnoresKeysUntilAnswered: enter then esc in the same batch
+// of input must not let the esc leave the settings after the save.
+func TestAppThemePickerIgnoresKeysUntilAnswered(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		t.Run(fmt.Sprintf("save fails=%v", fail), func(t *testing.T) {
+			useDefaultThemeAfter(t)
+			h := harness(t)
+			d := listed(t, h, &notes{})
+			d.openThemes()
+			if fail {
+				d.app.save = func(config.Config) error { return errors.New("disco lleno") }
+			}
+			// Both keys are handled before any message comes back; their
+			// messages are then delivered in order, as the runtime may.
+			var queued []tea.Msg
+			for _, k := range []string{"enter", "esc"} {
+				m, cmd := d.app.Update(tuitest.Key(k))
+				d.app = m.(App)
+				if cmd != nil {
+					queued = append(queued, cmd())
+				}
+			}
+			for _, msg := range queued {
+				if msg != nil {
+					d.send(msg)
+				}
+			}
+			if fail {
+				d.shows("a failed save", onThemes)
+				d.shows("a failed save", "No se pudo guardar: disco lleno")
+				// The picker answers keys again.
+				d.key("esc")
+				d.until("back", is[screens.BackMsg])
+				d.shows("esc after the error", onSettings)
+				return
+			}
+			d.shows("a saved theme", onSettings)
+		})
+	}
 }

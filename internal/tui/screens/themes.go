@@ -33,6 +33,7 @@ type ThemesModel struct {
 	themes        []theme.Theme
 	cursor        int
 	err           error // the chosen theme could not be saved; shown until the next key
+	chosen        bool  // ThemeChosenMsg is out: keys wait for the router's answer
 	width, height int
 }
 
@@ -49,9 +50,10 @@ func NewThemes(current string) ThemesModel {
 }
 
 // WithSaveError says that saving the chosen theme failed with err, until the
-// next key.
+// next key, and makes the picker answer keys again.
 func (m ThemesModel) WithSaveError(err error) ThemesModel {
 	m.err = err
+	m.chosen = false
 	return m
 }
 
@@ -64,6 +66,11 @@ func (m ThemesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 	case tea.KeyPressMsg:
+		if m.chosen {
+			// The router has not answered yet (saved, or failed): a later key
+			// would act on a screen that is about to change.
+			return m, nil
+		}
 		m.err = nil
 		switch msg.String() {
 		case "ctrl+c":
@@ -73,6 +80,7 @@ func (m ThemesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "down":
 			m.cursor = min(len(m.themes)-1, m.cursor+1)
 		case "enter":
+			m.chosen = true
 			return m, emit(ThemeChosenMsg{Name: m.themes[m.cursor].Name})
 		case "esc":
 			return m, emit(BackMsg{})

@@ -139,3 +139,20 @@ func TestThemesSaveError(t *testing.T) {
 		t.Errorf("the save error should go away with the next key:\n%s", plain)
 	}
 }
+
+func TestThemesIgnoresKeysAfterChoosing(t *testing.T) {
+	var m tea.Model = NewThemes("pr-review")
+	m, cmd := m.Update(tuitest.Key("enter"))
+	if _, ok := cmd().(ThemeChosenMsg); !ok {
+		t.Fatalf("enter did not choose a theme")
+	}
+	for _, k := range []string{"esc", "down", "enter", "ctrl+c"} {
+		if _, cmd := m.Update(tuitest.Key(k)); cmd != nil {
+			t.Errorf("%s answered while the choice is pending", k)
+		}
+	}
+	m = m.(ThemesModel).WithSaveError(errors.New("x"))
+	if _, cmd := m.Update(tuitest.Key("esc")); cmd == nil {
+		t.Error("esc ignored after the save error")
+	}
+}
