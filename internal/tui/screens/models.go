@@ -29,10 +29,10 @@ type ModelsModel struct {
 	current map[config.Role]config.Assignment
 	roles   []config.Role
 	cursor  int
-	// presetAt is the position in presetCycle of the last preset applied
-	// (or of the starting preset); -1 when none.
-	presetAt int
-	err      error
+	// base is the preset the table counts changes from: the starting one, or
+	// the last one applied with "p".
+	base config.Preset
+	err  error
 
 	width, height int
 }
@@ -41,9 +41,9 @@ type ModelsModel struct {
 func NewModels(cfg config.Config, save func(config.Config) error) ModelsModel {
 	m := ModelsModel{
 		cfg: cfg, save: save, roles: config.AllRoles(),
-		start:    map[config.Role]config.Assignment{},
-		current:  map[config.Role]config.Assignment{},
-		presetAt: slices.Index(presetCycle, cfg.Preset),
+		start:   map[config.Role]config.Assignment{},
+		current: map[config.Role]config.Assignment{},
+		base:    cfg.Preset,
 	}
 	for _, r := range m.roles {
 		a := cfg.AssignmentFor(r)
@@ -77,8 +77,9 @@ func (m ModelsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "e":
 			m.current = m.withAssignment(role, cycleEffort(m.current[role]))
 		case "p":
-			m.presetAt = (m.presetAt + 1) % len(presetCycle)
-			m.current = config.PresetAssignments(presetCycle[m.presetAt])
+			m.base = presetCycle[(slices.Index(presetCycle, m.base)+1)%len(presetCycle)]
+			m.start = config.PresetAssignments(m.base)
+			m.current = config.PresetAssignments(m.base)
 		case "g":
 			out := m.result()
 			if err := m.save(out); err != nil {
@@ -146,6 +147,7 @@ func (m ModelsModel) result() config.Config {
 	for k, v := range m.current {
 		out.Models[k] = v
 	}
+	out.Preset = m.base
 	if m.changes() > 0 {
 		out.Preset = config.PresetPersonalizado
 	}
@@ -158,7 +160,7 @@ func (m ModelsModel) View() tea.View { return tea.NewView(m.render(m.width, m.he
 func (m ModelsModel) render(width, height int) string {
 	from := "tu configuración"
 	for _, o := range presetOptions {
-		if o.preset == m.cfg.Preset && o.preset != config.PresetPersonalizado {
+		if o.preset == m.base && o.preset != config.PresetPersonalizado {
 			from = o.name
 		}
 	}

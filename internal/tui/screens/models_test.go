@@ -218,3 +218,77 @@ func TestPresetPickerWidth(t *testing.T) {
 		checkWidth(t, NewPresetPicker(config.Defaults()).render(w, 30), w)
 	}
 }
+
+func TestModelsPresetRebases(t *testing.T) {
+	var saved []config.Config
+	save := func(c config.Config) error { saved = append(saved, c); return nil }
+
+	m, _ := pressKeys(newModels(save), "p", "p") // economico, potente
+	out := tuitest.Plain(m.(ModelsModel).render(120, 24))
+	if !strings.Contains(out, "partiste de Potente, con 0 cambios") || strings.Contains(out, "cambiado") {
+		t.Errorf("after p:\n%s", out)
+	}
+	_, msg := pressKeys(m, "g")
+	got, ok := msg.(ModelsSavedMsg)
+	if !ok || len(saved) != 1 || saved[0].Preset != config.PresetPotente || got.Cfg.Preset != config.PresetPotente {
+		t.Fatalf("p+g: msg=%+v saved=%+v", msg, saved)
+	}
+
+	// one edit after p -> personalizado, count 1
+	saved = nil
+	m2 := goToRole(m, config.RoleSeguridad)
+	m2, _ = pressKeys(m2, "right")
+	if out := tuitest.Plain(m2.(ModelsModel).render(120, 24)); !strings.Contains(out, "partiste de Potente, con 1 cambio") {
+		t.Errorf("after edit:\n%s", out)
+	}
+	_, msg = pressKeys(m2, "g")
+	if got, ok := msg.(ModelsSavedMsg); !ok || got.Cfg.Preset != config.PresetPersonalizado || saved[0].Preset != config.PresetPersonalizado {
+		t.Fatalf("p+edit+g: msg=%+v", msg)
+	}
+
+	// away and back clears the marker
+	m3, _ := pressKeys(goToRole(newModels(save), config.RoleSeguridad), "right", "left")
+	out = tuitest.Plain(m3.(ModelsModel).render(120, 24))
+	if strings.Contains(out, "cambiado") || !strings.Contains(out, "con 0 cambios") {
+		t.Errorf("away and back:\n%s", out)
+	}
+
+	// p then esc does not save
+	saved = nil
+	_, msg = pressKeys(m, "esc")
+	if _, ok := msg.(BackMsg); !ok || len(saved) != 0 {
+		t.Errorf("p+esc: msg=%+v saved=%d", msg, len(saved))
+	}
+}
+
+func TestModelsPresetCycleValid(t *testing.T) {
+	var saved []config.Config
+	save := func(c config.Config) error { saved = append(saved, c); return nil }
+	var m tea.Model = newModels(save)
+	for i := 0; i < 4; i++ {
+		m, _ = pressKeys(m, "p", "g")
+	}
+	if len(saved) != 4 {
+		t.Fatalf("saved %d", len(saved))
+	}
+	for _, c := range saved {
+		for r, a := range c.Models {
+			if !a.Valid() {
+				t.Errorf("%s invalid: %+v", r, a)
+			}
+		}
+	}
+}
+
+func TestModelsPersonalizadoBase(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Preset = config.PresetPersonalizado
+	m := NewModels(cfg, func(config.Config) error { return nil })
+	if out := tuitest.Plain(m.render(120, 24)); !strings.Contains(out, "partiste de tu configuración, con 0 cambios") {
+		t.Errorf("header:\n%s", out)
+	}
+	_, msg := pressKeys(m, "g")
+	if got := msg.(ModelsSavedMsg); got.Cfg.Preset != config.PresetPersonalizado {
+		t.Errorf("preset = %s", got.Cfg.Preset)
+	}
+}
