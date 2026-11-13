@@ -5,6 +5,7 @@
 package pipeline
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -54,6 +55,7 @@ type Request struct {
 
 // Result is the outcome of a review.
 type Result struct {
+	Version           int `json:"version"` // ResultVersion, so findings.json is a versioned contract
 	Repo              string
 	PR                prb.PR
 	Mode              Mode
@@ -100,6 +102,18 @@ const (
 	gapNoFileList = "prb no informó la lista de archivos del PR: no se pudo comprobar que el diff los trajera todos"
 	gapTruncated  = "prb marcó el diff como recortado sin decir qué archivos faltan"
 )
+
+// ResultVersion is the version of Result, and so of findings.json.
+const ResultVersion = 1
+
+// maxValidators caps the validators of one review: they are the costliest
+// agents, and a noisy or injected specialist must not launch dozens. Past
+// the cap, candidates stay sin_confirmar, shown and not validated, and the
+// review is not counted as failed for it.
+const maxValidators = 20
+
+// reasonValidatorCap is the reason of a candidate past maxValidators.
+const reasonValidatorCap = "no se validó: tope de validadores"
 
 // reasonFiltrado is the reason of a Group B finding the filter hides.
 const reasonFiltrado = "Grupo B sin hallazgo del Grupo A en el mismo archivo o función"
@@ -182,7 +196,7 @@ type failure struct {
 }
 
 func (r *run) review() (Result, error) {
-	res := Result{Repo: r.req.Repo, PR: r.req.PR.PullRequest, Mode: r.mode, Started: r.d.Now()}
+	res := Result{Version: ResultVersion, Repo: r.req.Repo, PR: r.req.PR.PullRequest, Mode: r.mode, Started: r.d.Now()}
 	steps := []struct {
 		stage Stage
 		fn    func() error
@@ -238,8 +252,9 @@ func (r *run) review() (Result, error) {
 // Stage 1: deterministic checks. The diff comes without the generated files
 // (prb --exclude), so those, and the lockfile changes among them, are only
 // visible in the PR diffstat. A non-generated file of the diffstat that the
-// diff does not bring at all was never reviewed. When the diff as a whole
-// cannot be checked against the PR, that is a gap.
+// diff does not bring at all was never reviewed, and the diffstat's size wins
+// when prb left files out of the diff. When the diff as a whole cannot be
+// checked against the PR, that is a gap.
 func (r *run) prechecks() error {
 	d := r.req.Diff
 	pre := prechecks.Run(r.req.PR.PullRequest, d, r.d.Cfg)
@@ -253,6 +268,11 @@ func (r *run) prechecks() error {
 		stat := prechecks.Summarize(fs.Files, r.d.Cfg)
 		pre.Excluded = union(pre.Excluded, stat.Excluded)
 		pre.Sensitive = union(pre.Sensitive, stat.Sensitive)
+		pre.TotalLines = max(pre.TotalLines, stat.TotalLines)
+		if stat.Oversize && !pre.Oversize {
+			pre.Oversize = true
+			pre.Findings = append(pre.Findings, prechecks.OversizeFindings(r.req.PR.PullRequest)...)
+		}
 		var missing []string
 		for _, f := range fs.Files {
 			switch {
@@ -472,7 +492,9 @@ type specialistOut struct {
 
 // Stage 4: the specialists, in parallel. Critico and alto findings are
 // candidates for stage 5, always in Group A (a grave finding is never minor
-// quality); medio and bajo are not validated one by one.
+// quality); medio and bajo are not validated one by one. What a model writes
+// is made safe first: paths relative to the repo, an unknown severity is
+// alto (so it is validated) and an unknown group is A (so it counts).
 func (r *run) specialists() error {
 	outs := make([]specialistOut, len(r.jobs))
 	errs := make([]error, len(r.jobs))
@@ -495,6 +517,13 @@ func (r *run) specialists() error {
 		}
 		for _, f := range outs[i].Findings {
 			f.ID, f.Role = r.newID(j.role), j.role
+			f.File = r.findingPath(f.File)
+			if !knownSeverity(f.Severity) {
+				f.Severity = finding.SeverityAlto
+			}
+			if f.Group != finding.GroupB {
+				f.Group = finding.GroupA
+			}
 			f.Status = finding.StatusConfirmado
 			if f.Severity.Grave() {
 				f.Status, f.Group = finding.StatusCandidato, finding.GroupA
@@ -528,10 +557,10 @@ func (r *run) candidates() []int {
 
 // Stage 5: one validator per candidate, in parallel: validador_reglas for
 // the reglas candidates, validador_bugs for the rest (bugs, seguridad, tests
-// and the precheck secrets). Group B is filtered afterwards, against the
-// confirmed Group A findings.
+// and the precheck secrets), up to maxValidators, critico first. Group B is
+// filtered afterwards, against the confirmed Group A findings.
 func (r *run) validate() error {
-	idx := r.candidates()
+	idx := r.capValidators(r.candidates())
 	names, promptRoles := make([]string, len(idx)), make([]string, len(idx))
 	outs := make([]validatorOut, len(idx))
 	errs := make([]error, len(idx))
@@ -564,6 +593,40 @@ func (r *run) validate() error {
 	}
 	r.filterGroupB()
 	return nil
+}
+
+// capValidators keeps maxValidators of the candidates at idx, critico ones
+// first and otherwise in order, and leaves the rest sin_confirmar. The kept
+// ones stay in their original order.
+func (r *run) capValidators(idx []int) []int {
+	if len(idx) <= maxValidators {
+		return idx
+	}
+	byGravity := slices.Clone(idx)
+	slices.SortStableFunc(byGravity, func(a, b int) int {
+		return cmp.Compare(gravity(r.findings[a].Severity), gravity(r.findings[b].Severity))
+	})
+	for _, i := range byGravity[maxValidators:] {
+		r.findings[i].Status, r.findings[i].Reason = finding.StatusSinConfirmar, reasonValidatorCap
+	}
+	keep := byGravity[:maxValidators]
+	return slices.DeleteFunc(idx, func(i int) bool { return !slices.Contains(keep, i) })
+}
+
+func knownSeverity(s finding.Severity) bool {
+	switch s {
+	case finding.SeverityCritico, finding.SeverityAlto, finding.SeverityMedio, finding.SeverityBajo:
+		return true
+	}
+	return false
+}
+
+// gravity orders severities for the validator cap: critico first.
+func gravity(s finding.Severity) int {
+	if s == finding.SeverityCritico {
+		return 0
+	}
+	return 1
 }
 
 // applyValidation applies spec 6.9: the validator decides the status and the
@@ -849,6 +912,23 @@ func reasonFor(err error) string {
 		err = ae.Err
 	}
 	return err.Error()
+}
+
+// findingPath normalizes the file of a model-written finding to the diff's
+// form: relative to the repo, without the head or base worktree prefix,
+// "./" or redundant separators.
+func (r *run) findingPath(p string) string {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return ""
+	}
+	for _, dir := range []string{r.req.Trees.Head, r.req.Trees.Base} {
+		if rel, ok := strings.CutPrefix(p, strings.TrimSuffix(dir, "/")+"/"); dir != "" && ok {
+			p = rel
+			break
+		}
+	}
+	return path.Clean(p)
 }
 
 // planPath normalizes a path written by the plan: no surrounding spaces,

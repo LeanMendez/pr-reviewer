@@ -1215,3 +1215,105 @@ func TestVerdictIgnoresMinorCap(t *testing.T) {
 		t.Errorf("verdict %s, want aprobar_con_comentarios: the cap only decides what is listed", res.Verdict)
 	}
 }
+
+func TestOversizeFromDiffstat(t *testing.T) {
+	parts := []finding.SplitPart{{Title: "Parte A", Files: []string{"src/a.go"}, Lines: 1}, {Title: "Parte B", Files: []string{"src/b.go"}, Lines: 450}}
+	fake := newFake(map[string]any{prompts.RoleSuperiorSintesis: synthesisReply(true, parts...)})
+	req := newRequest(t, ModeLigero)
+	req.PR.PullRequest.Description = ""
+	// prb left src/b.go out of the diff: only the diffstat knows its size.
+	req.Diff.OmittedFiles = []string{"src/b.go"}
+	req.PR.Files.Files = append(req.PR.Files.Files, prb.FileStat{Path: "src/b.go", LinesAdded: 450})
+	res := mustRun(t, newDeps(fake), req)
+
+	if len(res.Split) != 2 {
+		t.Errorf("Split = %+v, want the proposal of an oversize PR", res.Split)
+	}
+	if !slices.ContainsFunc(res.Findings, func(f finding.Finding) bool { return strings.HasPrefix(f.What, "El PR es grande") }) {
+		t.Errorf("findings %+v lack the big-PR description finding", res.Findings)
+	}
+	if p := fake.byName(t, "bugs").Prompt; !strings.Contains(p, "Tamaño: 451 líneas cambiadas; supera el umbral") {
+		t.Errorf("the agents must get the diffstat size:\n%s", p)
+	}
+}
+
+func TestFindingPathsNormalized(t *testing.T) {
+	req := newRequest(t, ModeLigero)
+	anchor := hallazgo("./src/a.go", 3, finding.SeverityCritico, finding.GroupA, "ancla")
+	abs := hallazgo(filepath.Join(req.Trees.Head, "src", "a.go"), 5, finding.SeverityMedio, finding.GroupA, "absoluta")
+	fake := newFake(map[string]any{
+		prompts.RoleBugs:   specialistReply(anchor, abs),
+		prompts.RoleReglas: specialistReply(hallazgo("src/a.go", 8, finding.SeverityBajo, finding.GroupB, "menor")),
+	})
+	res := mustRun(t, newDeps(fake), req)
+	for _, id := range []string{"bugs-001", "bugs-002"} {
+		if f := findingByID(t, res, id); f.File != "src/a.go" {
+			t.Errorf("%s file %q, want src/a.go", id, f.File)
+		}
+	}
+	if f := findingByID(t, res, "reglas-001"); f.Status != finding.StatusConfirmado {
+		t.Errorf("the B finding next to its anchor must stay, got %s %q", f.Status, f.Reason)
+	}
+}
+
+func TestValidatorCap(t *testing.T) {
+	var hs []map[string]any
+	for i := 1; i <= 21; i++ {
+		hs = append(hs, hallazgo("src/a.go", i, finding.SeverityAlto, finding.GroupA, fmt.Sprintf("alto-%d", i)))
+	}
+	hs = append(hs, hallazgo("src/a.go", 99, finding.SeverityCritico, finding.GroupA, "critico"))
+	fake := newFake(map[string]any{prompts.RoleBugs: specialistReply(hs...)})
+	res := mustRun(t, newDeps(fake), newRequest(t, ModeLigero))
+
+	if n := len(fake.byRole(prompts.RoleValidadorBugs)); n != maxValidators || maxValidators != 20 {
+		t.Fatalf("%d validators ran, want 20", n)
+	}
+	fake.byName(t, "validador_bugs-bugs-022") // the critico goes first
+	for _, id := range []string{"bugs-020", "bugs-021"} {
+		if f := findingByID(t, res, id); f.Status != finding.StatusSinConfirmar || f.Reason != "no se validó: tope de validadores" {
+			t.Errorf("%s = %s %q, want sin_confirmar past the cap", id, f.Status, f.Reason)
+		}
+	}
+	if len(res.FailedAgents) != 0 || res.IncompleteWarning || res.Verdict != finding.VerdictPedirCambios {
+		t.Errorf("failed %v warning %v verdict %s: the cap is not a failure", res.FailedAgents, res.IncompleteWarning, res.Verdict)
+	}
+}
+
+func TestUnknownEnumsFailSafe(t *testing.T) {
+	noSeverity := hallazgo("src/a.go", 3, "", finding.GroupA, "sin-severidad")
+	invented := hallazgo("src/a.go", 4, "gravisimo", finding.GroupA, "inventada")
+	noGroup := hallazgo("src/a.go", 5, finding.SeverityMedio, "C", "sin-grupo")
+	fake := newFake(map[string]any{prompts.RoleBugs: specialistReply(noSeverity, invented, noGroup)})
+	res := mustRun(t, newDeps(fake), newRequest(t, ModeLigero))
+
+	for _, id := range []string{"bugs-001", "bugs-002"} {
+		if f := findingByID(t, res, id); f.Severity != finding.SeverityAlto || f.Status != finding.StatusConfirmado {
+			t.Errorf("%s = %s %s, want alto confirmed by its validator", id, f.Severity, f.Status)
+		}
+		fake.byName(t, "validador_bugs-"+id)
+	}
+	if f := findingByID(t, res, "bugs-003"); f.Group != finding.GroupA {
+		t.Errorf("unknown group %q, want A", f.Group)
+	}
+	if res.Verdict != finding.VerdictPedirCambios {
+		t.Errorf("verdict %s, want pedir_cambios", res.Verdict)
+	}
+}
+
+func TestResultVersioned(t *testing.T) {
+	res := mustRun(t, newDeps(newFake(nil)), newRequest(t, ModeLigero))
+	if res.Version != 1 {
+		t.Errorf("Version = %d, want 1", res.Version)
+	}
+	raw, err := json.Marshal(res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"version":1`) {
+		t.Errorf("findings.json lacks the version key: %s", raw)
+	}
+	var back Result
+	if err := json.Unmarshal(raw, &back); err != nil || back.Version != 1 || back.Verdict != res.Verdict {
+		t.Errorf("round trip = %+v, %v", back, err)
+	}
+}

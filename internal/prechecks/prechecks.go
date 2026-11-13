@@ -121,14 +121,24 @@ func processFindings(pr prb.PR, oversize bool, cfg config.Config) []finding.Find
 			"Renombrá el PR para que empiece con el ID de la tarea, por ejemplo `CU-123 Descripción`.",
 			"título del PR: "+pr.Title))
 	}
-	if oversize && nonSpace(pr.Description) < minDescriptionChars {
-		out = append(out, processFinding(
-			"El PR es grande y tiene la descripción vacía o casi vacía.",
-			"Un PR grande sin contexto es difícil de revisar y de entender después.",
-			"Completá la descripción con qué cambia, por qué y cómo probarlo, o dividí el PR.",
-			"descripción del PR"))
+	if oversize {
+		out = append(out, OversizeFindings(pr)...)
 	}
 	return out
+}
+
+// OversizeFindings are the process findings of a PR over the size
+// threshold: a missing or minimal description. Run adds them; a caller that
+// learns the PR is oversize only from the diffstat adds them itself.
+func OversizeFindings(pr prb.PR) []finding.Finding {
+	if nonSpace(pr.Description) >= minDescriptionChars {
+		return nil
+	}
+	return []finding.Finding{processFinding(
+		"El PR es grande y tiene la descripción vacía o casi vacía.",
+		"Un PR grande sin contexto es difícil de revisar y de entender después.",
+		"Completá la descripción con qué cambia, por qué y cómo probarlo, o dividí el PR.",
+		"descripción del PR")}
 }
 
 func processFinding(what, why, fix, evidence string) finding.Finding {
