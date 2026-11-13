@@ -28,6 +28,7 @@ var (
 	current Theme
 	label   lipgloss.Style // "Crítico": Label text on a Crit background
 	bgSeq   string         // SGR sequence that sets the theme background
+	fgSeq   string         // SGR sequence that sets the theme Text foreground
 )
 
 func init() {
@@ -47,6 +48,8 @@ func Use(t Theme) {
 	label = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Label)).Background(lipgloss.Color(t.Crit))
 	r, g, b := parseHex(t.BG)
 	bgSeq = fmt.Sprintf("\x1b[48;2;%d;%d;%dm", int(r), int(g), int(b))
+	r, g, b = parseHex(t.Text)
+	fgSeq = fmt.Sprintf("\x1b[38;2;%d;%d;%dm", int(r), int(g), int(b))
 	current = t
 }
 

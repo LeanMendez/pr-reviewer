@@ -88,3 +88,24 @@ func TestFillTrailingNewlineAndUnknownSize(t *testing.T) {
 		}
 	}
 }
+
+func TestFillUnstyledTextGetsTextForeground(t *testing.T) {
+	for _, name := range []string{"sensei", "gemini"} {
+		th := useTheme(t, name)
+		content := "sin estilo " + Dim.Render("tenue") + " tras span\x1b[1m negrita\x1b[m tras reset\x1b[39m tras 39"
+		for _, l := range strings.Split(Fill(content, 80, 1), "\n") {
+			for _, c := range tuitest.Cells(l) {
+				if strings.TrimSpace(c.Text) == "" {
+					continue
+				}
+				want := th.Text
+				if strings.Contains("tenue", c.Text) && c.FG == th.Dim {
+					want = th.Dim
+				}
+				if c.FG != want {
+					t.Errorf("%s: cell %q fg %q, want %s", name, c.Text, c.FG, want)
+				}
+			}
+		}
+	}
+}
