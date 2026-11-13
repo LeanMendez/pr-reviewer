@@ -49,11 +49,12 @@ type runFunc func(ctx context.Context, row listdata.Row, mode pipeline.Mode, eve
 
 // review is one review started from the interface.
 type review struct {
-	cancel   context.CancelFunc
-	events   chan pipeline.Event
-	progress screens.ProgressModel
-	done     *screens.ReviewDoneMsg // nil while it runs
-	doneAt   time.Time
+	cancel    context.CancelFunc
+	cancelled bool // the user cancelled it, from its progress or by quitting
+	events    chan pipeline.Event
+	progress  screens.ProgressModel
+	done      *screens.ReviewDoneMsg // nil while it runs; the last result of the PR after
+	doneAt    time.Time
 }
 
 // Reviews is the registry of the reviews started in this session, by PR
@@ -86,7 +87,10 @@ func (r *Reviews) Start(row listdata.Row, mode pipeline.Mode) (<-chan pipeline.E
 	}
 	ctx, cancel := context.WithCancel(r.base)
 	events := make(chan pipeline.Event, r.buffer)
-	r.byPR[pr] = &review{cancel: cancel, events: events, progress: screens.NewProgress(row, mode, nil, cancel)}
+	rv := &review{cancel: cancel, events: events}
+	// Only Update runs the progress's cancel, so cancelled needs no lock.
+	rv.progress = screens.NewProgress(row, mode, nil, func() { rv.cancelled = true; cancel() })
+	r.byPR[pr] = rv
 	cmd := r.run(ctx, row, mode, events)
 	result := make(chan tea.Msg, 1)
 	r.wg.Add(1)
@@ -118,14 +122,20 @@ func (r *Reviews) finish(msg screens.ReviewDoneMsg, at time.Time) *review {
 	return rv
 }
 
-// markSaved marks on list every review of this session that saved a report.
-func (r *Reviews) markSaved(list screens.ListModel) screens.ListModel {
+// mark shows on list the reviews of this session: the ones running, and the
+// ones that ended with a result, saved or not (the router opens it from
+// memory).
+func (r *Reviews) mark(list screens.ListModel) screens.ListModel {
+	var running []int
 	for pr, rv := range r.byPR {
-		if rv.done != nil && rv.done.Dir != "" {
+		switch {
+		case rv.done == nil:
+			running = append(running, pr)
+		case rv.done.Err == nil:
 			list = list.MarkReviewed(pr, rv.doneAt)
 		}
 	}
-	return list
+	return list.WithRunning(running...)
 }
 
 // Running is how many reviews have not ended yet.
@@ -144,6 +154,7 @@ func (r *Reviews) Running() int {
 func (r *Reviews) CancelAll() {
 	for _, rv := range r.byPR {
 		if rv.done == nil {
+			rv.cancelled = true
 			rv.cancel()
 		}
 	}

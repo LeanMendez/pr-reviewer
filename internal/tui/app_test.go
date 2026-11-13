@@ -627,6 +627,130 @@ func TestShutdown(t *testing.T) {
 	}
 }
 
+// rowLine is the list row of title (the first line that names it).
+func rowLine(view, title string) string {
+	for _, l := range strings.Split(view, "\n") {
+		if strings.Contains(l, title) {
+			return l
+		}
+	}
+	return ""
+}
+
+func TestAppBackgroundShowsRunning(t *testing.T) {
+	h := harness(t)
+	release := make(chan struct{})
+	h.Agents.OnRun = func(ctx context.Context, _ agent.Spec) error {
+		select {
+		case <-release:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	d := listed(t, h, &notes{})
+	d.send(screens.StartReviewMsg{Row: row477(), Mode: pipeline.ModeLigero})
+	d.send(screens.BackgroundMsg{PR: 477})
+	v := d.view()
+	if l := rowLine(v, "CU-1 Pagos"); !strings.Contains(l, "revisando") {
+		t.Errorf("the row under review lacks its mark: %q", l)
+	}
+	if !strings.Contains(v, "1 revisión en curso") {
+		t.Errorf("the header lacks the running count:\n%s", v)
+	}
+	close(release)
+	d.until("the notification", is[notifiedMsg])
+	if v := d.view(); strings.Contains(v, "revisando") || strings.Contains(v, "en curso") {
+		t.Errorf("a finished review is still marked as running:\n%s", v)
+	}
+}
+
+func TestAppBackgroundFailureNotesTheList(t *testing.T) {
+	h := harness(t)
+	h.Deps.PRB.Exec = func(context.Context, execx.Cmd) error { return errors.New("sin red") }
+	n := &notes{}
+	d := listed(t, h, n)
+	d.send(screens.StartReviewMsg{Row: row477(), Mode: pipeline.ModeLigero})
+	d.send(screens.BackgroundMsg{PR: 477})
+	d.until("the notification", is[notifiedMsg])
+	v := d.view()
+	if !strings.Contains(v, "#477: la revisión falló: sin red") {
+		t.Errorf("a failed background review must say so on the list:\n%s", v)
+	}
+	if strings.Contains(rowLine(v, "CU-1 Pagos"), "revisando") || strings.Contains(v, "lo revisó hace") {
+		t.Errorf("a failed review is neither running nor reviewed:\n%s", v)
+	}
+	if calls := n.all(); len(calls) != 1 || calls[0][2] != "#477: la revisión falló: sin red" {
+		t.Errorf("notifications = %q", calls)
+	}
+}
+
+func TestAppBackgroundUnsavedOpensTheResult(t *testing.T) {
+	h := harness(t)
+	// A directory where context.json goes makes the report fail to save.
+	blocker := filepath.Join(h.Reports, "stock", "pr-477-20261112-1030", "context.json")
+	if err := os.MkdirAll(blocker, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	d := listed(t, h, &notes{})
+	d.send(screens.StartReviewMsg{Row: row477(), Mode: pipeline.ModeLigero})
+	d.send(screens.BackgroundMsg{PR: 477})
+	d.until("the notification", is[notifiedMsg])
+	v := d.view()
+	if !strings.Contains(v, "#477 listo: Aprobar.") || !strings.Contains(v, "no se pudo guardar el reporte") {
+		t.Errorf("an unsaved review must say so on the list:\n%s", v)
+	}
+	if !strings.Contains(v, "lo revisó hace") || !strings.Contains(v, "o abrir el último reporte") {
+		t.Fatalf("an unsaved review still offers its result:\n%s", v)
+	}
+	d.key("o")
+	d.until("the report", is[screens.OpenReportMsg])
+	v = d.view()
+	for _, want := range []string{"Aprobar.", "Aviso: no se pudo guardar el reporte"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("report: missing %q in:\n%s", want, v)
+		}
+	}
+	if strings.Contains(v, "Guardado en") || strings.Contains(v, "No pude abrir el reporte") {
+		t.Errorf("the result was never saved:\n%s", v)
+	}
+}
+
+// TestAppCancelThenBackground: c and then s; the engine ends with its own
+// error, not context.Canceled, and the review still reads as cancelled.
+func TestAppCancelThenBackground(t *testing.T) {
+	h := harness(t)
+	release := make(chan struct{})
+	inner := h.Deps.PRB.Exec
+	h.Deps.PRB.Exec = func(ctx context.Context, c execx.Cmd) error {
+		if len(c.Args) > 1 && c.Args[1] == "context" {
+			<-ctx.Done()
+			<-release
+			return &execx.ExitError{Code: 137, Stderr: "killed"}
+		}
+		return inner(ctx, c)
+	}
+	n := &notes{}
+	d := listed(t, h, n)
+	d.send(screens.StartReviewMsg{Row: row477(), Mode: pipeline.ModeLigero})
+	d.key("c")
+	d.key("s")
+	d.until("the list", is[screens.BackgroundMsg])
+	close(release)
+	done := d.until("the end of the review", is[screens.ReviewDoneMsg]).(screens.ReviewDoneMsg)
+	if errors.Is(done.Err, context.Canceled) {
+		t.Fatalf("the fake must end with its own error, got %v", done.Err)
+	}
+	d.until("the notification", is[notifiedMsg])
+	const want = "#477: la revisión se canceló."
+	if calls := n.all(); len(calls) != 1 || calls[0][2] != want {
+		t.Errorf("notifications = %q, want %q", calls, want)
+	}
+	if v := d.view(); !strings.Contains(v, want) || strings.Contains(v, "falló") {
+		t.Errorf("the list should say the review was cancelled:\n%s", v)
+	}
+}
+
 func TestAppStaleReloadKeepsReviewed(t *testing.T) {
 	h := harness(t)
 	d := listed(t, h, &notes{})

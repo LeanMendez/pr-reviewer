@@ -389,6 +389,31 @@ func TestListMarkReviewed(t *testing.T) {
 	}
 }
 
+func TestListRunning(t *testing.T) {
+	var calls int
+	m := loaded(t, &calls).WithRunning(477)
+	out := tuitest.Plain(m.render(100, 30))
+	if l := lineWith(out, "Migrar facturas"); !strings.Contains(l, "revisando") {
+		t.Errorf("the row under review lacks its mark: %q", l)
+	}
+	if l := lineWith(out, "Refresh token"); strings.Contains(l, "revisando") {
+		t.Errorf("a row not under review is marked: %q", l)
+	}
+	for _, want := range []string{"1 revisión en curso", "pr-review lo está revisando", "enter ver el progreso"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	checkWidth(t, m.render(100, 30), 100)
+
+	if out := tuitest.Plain(m.WithRunning(477, 88).render(100, 30)); !strings.Contains(out, "2 revisiones en curso") {
+		t.Errorf("two reviews running:\n%s", out)
+	}
+	if out := tuitest.Plain(m.WithRunning().render(100, 30)); strings.Contains(out, "en curso") || strings.Contains(out, "revisando") {
+		t.Errorf("nothing running, nothing marked:\n%s", out)
+	}
+}
+
 func TestListWithNote(t *testing.T) {
 	var calls int
 	m := loaded(t, &calls).WithNote("No pude abrir el reporte: roto")

@@ -8,6 +8,7 @@ import (
 
 	"github.com/LeanMendez/pr-review/internal/app"
 	"github.com/LeanMendez/pr-review/internal/config"
+	"github.com/LeanMendez/pr-review/internal/pipeline"
 	"github.com/LeanMendez/pr-review/internal/report"
 	"github.com/LeanMendez/pr-review/internal/tui/listdata"
 	"github.com/LeanMendez/pr-review/internal/tui/screens"
@@ -35,14 +36,14 @@ func (a App) route(msg tea.Msg) (App, tea.Cmd) {
 		return a.reviewDone(msg)
 	case notifiedMsg:
 		if msg.err != nil {
-			a.list = a.list.WithNote("No pude avisar: " + msg.err.Error())
+			a.list = a.list.WithNote(msg.text + " (No pude avisar: " + msg.err.Error() + ")")
 		}
 		return a, nil
 	// Loads land on their screen even when the user already moved on.
 	case screens.RowsLoadedMsg:
 		a.list, cmd = update(a.list, msg)
 		// A load started before a review ended does not know about it.
-		a.list = a.reviews.markSaved(a.list)
+		a.list = a.reviews.mark(a.list)
 		return a, cmd
 	case screens.ReposLoadedMsg:
 		a.picker, cmd = update(a.picker, msg)
@@ -154,7 +155,7 @@ func (a App) openPicker() (App, tea.Cmd) {
 
 func (a App) openList(repo string) (App, tea.Cmd) {
 	a.s.repo = repo
-	a.list = screens.NewList(repo, a.loadRows(repo)).WithThreshold(a.s.d.Cfg.Thresholds.MaxLines)
+	a.list = a.reviews.mark(screens.NewList(repo, a.loadRows(repo)).WithThreshold(a.s.d.Cfg.Thresholds.MaxLines))
 	return a.show(scrList, a.list.Init())
 }
 
@@ -187,6 +188,7 @@ func (a App) showProgress(pr int) (App, tea.Cmd) {
 func (a App) startReview(msg screens.StartReviewMsg) (App, tea.Cmd) {
 	pr := msg.Row.Ctx.PullRequest.ID
 	events, wait := a.reviews.Start(msg.Row, msg.Mode)
+	a.list = a.reviews.mark(a.list)
 	a, cmd := a.showProgress(pr)
 	if wait == nil { // already running, and already drained
 		return a, cmd
@@ -205,13 +207,14 @@ func (a App) reviewEvent(msg reviewEventMsg) (App, tea.Cmd) {
 }
 
 // reviewDone records the end of a review. A review on screen goes on to its
-// report; one in the background marks its row and notifies the desktop.
+// report; one in the background marks its row and notifies the desktop, and
+// when it did not end well (failed, cancelled, unsaved) the list says so too.
 func (a App) reviewDone(msg screens.ReviewDoneMsg) (App, tea.Cmd) {
 	rv := a.reviews.finish(msg, a.now())
 	if rv == nil {
 		return a, nil
 	}
-	a.list = a.reviews.markSaved(a.list)
+	a.list = a.reviews.mark(a.list)
 	if a.quitting {
 		if a.reviews.Running() == 0 {
 			return a, tea.Quit
@@ -226,14 +229,23 @@ func (a App) reviewDone(msg screens.ReviewDoneMsg) (App, tea.Cmd) {
 	if a.screen == scrProgress && a.progressPR == msg.PR {
 		return a, cmd
 	}
-	return a, a.notify(msg)
+	text := doneText(msg, rv.cancelled)
+	if msg.Err != nil || msg.Warning != nil {
+		a.list = a.list.WithNote(text)
+	}
+	return a, a.notify(text)
 }
 
-// openResult shows the report of the review on screen, with where it was
-// saved and any warning it ended with.
+// openResult shows the report of the review on screen.
 func (a App) openResult(msg screens.OpenResultMsg) (App, tea.Cmd) {
+	return a.showResult(msg.Result, a.reviews.get(a.progressPR))
+}
+
+// showResult shows res, the result of rv, with where it was saved and any
+// warning it ended with.
+func (a App) showResult(res pipeline.Result, rv *review) (App, tea.Cmd) {
 	savedAt, note := "", ""
-	if rv := a.reviews.get(a.progressPR); rv != nil && rv.done != nil {
+	if rv != nil && rv.done != nil {
 		if rv.done.Dir != "" {
 			savedAt = filepath.Join(rv.done.Dir, "review.md")
 		}
@@ -241,13 +253,17 @@ func (a App) openResult(msg screens.OpenResultMsg) (App, tea.Cmd) {
 			note = "Aviso: " + rv.done.Warning.Error()
 		}
 	}
-	a.report = screens.NewReport(msg.Result, a.sys, savedAt).WithNote(note)
+	a.report = screens.NewReport(res, a.sys, savedAt).WithNote(note)
 	return a.show(scrReport)
 }
 
-// openReport shows the newest saved report of a PR, from the same root the
-// reviews write to.
+// openReport shows the last result of a PR: the one of this session, kept
+// in memory even when it could not be saved, or else the newest saved
+// report, from the same root the reviews write to.
 func (a App) openReport(msg screens.OpenReportMsg) (App, tea.Cmd) {
+	if rv := a.reviews.get(msg.PR); rv != nil && rv.done != nil && rv.done.Err == nil {
+		return a.showResult(rv.done.Result, rv)
+	}
 	res, savedAt, err := report.LoadLatest(a.s.root, path.Base(msg.Repo), msg.PR)
 	if err != nil {
 		a.list = a.list.WithNote("No pude abrir el reporte: " + err.Error())

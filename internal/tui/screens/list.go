@@ -67,7 +67,8 @@ type ListModel struct {
 	showHidden  bool
 	filter      filterInput
 	threshold   int
-	note        string // shown until the next key
+	note        string       // shown until the next key
+	running     map[int]bool // PRs under review in this session
 
 	width, height int
 	now           func() time.Time
@@ -100,6 +101,15 @@ func (m ListModel) MarkReviewed(pr int, at time.Time) ListModel {
 		return out
 	}
 	m.ready, m.hidden = mark(m.ready), mark(m.hidden)
+	return m
+}
+
+// WithRunning marks prs, and only them, as under review.
+func (m ListModel) WithRunning(prs ...int) ListModel {
+	m.running = map[int]bool{}
+	for _, pr := range prs {
+		m.running[pr] = true
+	}
 	return m
 }
 
@@ -320,6 +330,11 @@ func (m ListModel) header(width int) string {
 	if n == 1 {
 		right = "1 listo para revisar"
 	}
+	if n := len(m.running); n == 1 {
+		right += "   1 revisión en curso"
+	} else if n > 1 {
+		right += fmt.Sprintf("   %d revisiones en curso", n)
+	}
 	if !m.loadedAt.IsZero() {
 		right += "   actualizado hace " + age(m.now().Sub(m.loadedAt))
 	}
@@ -465,7 +480,13 @@ func (m ListModel) row(e entry, selected bool, c columns, tw int) string {
 			title += reason
 		}
 	}
-	s := prefix + num.Render(pad(fmt.Sprint(pr.ID), numW)) + body.Render(pad(title, tw))
+	cell := body.Render(pad(title, tw))
+	if m.running[pr.ID] {
+		const mark = " · revisando"
+		t := ansi.Truncate(title, max(1, tw-ansi.StringWidth(mark)), "…")
+		cell = body.Render(t) + theme.Accent.Render(pad(mark, tw-ansi.StringWidth(t)))
+	}
+	s := prefix + num.Render(pad(fmt.Sprint(pr.ID), numW)) + cell
 	if c.author {
 		s += theme.Dim.Render(pad(clean(pr.Author), authorW))
 	}
@@ -479,7 +500,7 @@ func (m ListModel) row(e entry, selected bool, c columns, tw int) string {
 	} else {
 		s += theme.Dim.Render("  "+lines) + "  "
 		if e.Lines > m.threshold {
-			s = prefix + num.Render(pad(fmt.Sprint(pr.ID), numW)) + body.Render(pad(title, tw)) +
+			s = prefix + num.Render(pad(fmt.Sprint(pr.ID), numW)) + cell +
 				theme.Accent.Render("  "+lines) + "  "
 		}
 	}
@@ -505,10 +526,14 @@ func (m ListModel) detail(r listdata.Row, width int) []string {
 		theme.Dim.Render("    revisores ") + theme.Text.Render(reviewersText(pr.Review))
 
 	rev := theme.Dim.Render(" pr-review ")
-	if r.Reviewed {
+	switch {
+	case m.running[pr.ID]:
+		rev += theme.Text.Render("lo está revisando") +
+			"    " + theme.Strong.Render("enter") + theme.Dim.Render(" ver el progreso")
+	case r.Reviewed:
 		rev += theme.Text.Render("lo revisó hace "+age(m.now().Sub(r.LastReview))) +
 			"    " + theme.Strong.Render("o") + theme.Dim.Render(" abrir el último reporte")
-	} else {
+	default:
 		rev += theme.Text.Render("nunca lo revisó")
 	}
 

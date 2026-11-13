@@ -238,16 +238,22 @@ func (a App) loadRepos(workspace string, wsErr error) func() tea.Cmd {
 	}
 }
 
-// notifiedMsg is the result of a desktop notification; nothing waits on it.
-type notifiedMsg struct{ err error }
-
-// notify tells the desktop that a review the user is not watching ended.
-func (a App) notify(msg screens.ReviewDoneMsg) tea.Cmd {
-	s, body := a.sys, doneText(msg)
-	return func() tea.Msg { return notifiedMsg{err: s.Notify(context.Background(), "pr-review", body)} }
+// notifiedMsg is the result of the desktop notification of text; nothing
+// waits on it.
+type notifiedMsg struct {
+	text string
+	err  error
 }
 
-func doneText(msg screens.ReviewDoneMsg) string {
+// notify tells the desktop that a review the user is not watching ended.
+func (a App) notify(text string) tea.Cmd {
+	s := a.sys
+	return func() tea.Msg { return notifiedMsg{text: text, err: s.Notify(context.Background(), "pr-review", text)} }
+}
+
+// doneText says how a review ended. One the user cancelled reads as
+// cancelled whatever error the engine ended with.
+func doneText(msg screens.ReviewDoneMsg, cancelled bool) string {
 	switch {
 	case msg.Err == nil:
 		t := fmt.Sprintf("#%d listo: %s", msg.PR, report.VerdictText(msg.Result))
@@ -255,7 +261,7 @@ func doneText(msg screens.ReviewDoneMsg) string {
 			t += " Aviso: " + msg.Warning.Error() + "."
 		}
 		return t
-	case errors.Is(msg.Err, context.Canceled):
+	case cancelled || errors.Is(msg.Err, context.Canceled):
 		return fmt.Sprintf("#%d: la revisión se canceló.", msg.PR)
 	}
 	return fmt.Sprintf("#%d: la revisión falló: %v", msg.PR, msg.Err)
