@@ -4,6 +4,8 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/LeanMendez/pr-review/internal/config"
+	"github.com/LeanMendez/pr-review/internal/prb"
 	"github.com/LeanMendez/pr-review/internal/prechecks"
 )
 
@@ -36,6 +38,13 @@ func TestSuggest(t *testing.T) {
 		{"migraciones en castellano", prechecks.Result{Sensitive: []string{"migraciones/002.go"}}, ModeExhaustivo},
 		{"auth", prechecks.Result{Sensitive: []string{"config/auth.yaml"}}, ModeExhaustivo},
 		{"sql", prechecks.Result{Sensitive: []string{"db/schema.sql"}}, ModeExhaustivo},
+		{"auth en la ruta", prechecks.Result{Changed: []string{"internal/auth/session.go"}}, ModeExhaustivo},
+		{"login", prechecks.Result{Changed: []string{"src/handlers/Login.go"}}, ModeExhaustivo},
+		{"sesion", prechecks.Result{Changed: []string{"web/session_store.ts"}}, ModeExhaustivo},
+		{"token", prechecks.Result{Changed: []string{"pkg/token/jwt.go"}}, ModeExhaustivo},
+		{"permisos", prechecks.Result{Changed: []string{"app/permissions/policy.rb"}}, ModeExhaustivo},
+		{"seguridad", prechecks.Result{Changed: []string{"lib/security/csrf.js"}}, ModeExhaustivo},
+		{"codigo comun", prechecks.Result{Changed: []string{"src/payments/handler.go", "README.md"}}, ModeLigero},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -83,5 +92,16 @@ func TestEstimateAgents(t *testing.T) {
 		if got := EstimateAgents(m); got != want {
 			t.Errorf("EstimateAgents(%s) = %d, want %d", m, got, want)
 		}
+	}
+}
+
+func TestSuggestFromDiffstat(t *testing.T) {
+	stats := []prb.FileStat{{Path: "internal/auth/session.go", LinesAdded: 10}, {Path: "go.sum", LinesAdded: 3}}
+	sum := prechecks.Summarize(stats, config.Defaults())
+	if !slices.Equal(sum.Changed, []string{"internal/auth/session.go"}) {
+		t.Errorf("Changed = %v, want the non-generated paths", sum.Changed)
+	}
+	if got := Suggest(sum); got != ModeExhaustivo {
+		t.Errorf("Suggest(Summarize) = %s, want exhaustivo for an auth change", got)
 	}
 }

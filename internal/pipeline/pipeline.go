@@ -139,7 +139,8 @@ var specialistRoles = []specialistRole{
 // never dropped: the ones the rules set aside keep a status that says why.
 // Run only fails for an unknown mode, unreadable rules or a cancelled ctx.
 //
-// Events go to events when it is not nil; the caller must drain it. Run
+// Events go to events when it is not nil; the caller must drain it, though
+// AgentActivity is dropped rather than waited for while it is behind. Run
 // sends nothing after it returns and never closes it.
 func Run(ctx context.Context, d Deps, req Request, events chan<- Event) (Result, error) {
 	mode, err := ParseMode(string(req.Mode))
@@ -853,6 +854,11 @@ func call[T any](r *run, stage Stage, name, promptRole string, role config.Role,
 	send := func(kind EventKind, text string, err error) {
 		e := ev
 		e.Kind, e.Text, e.Err = kind, text, err
+		if kind == AgentDone {
+			if s, ok := any(out).(specialistOut); ok {
+				e.Candidates = len(s.Findings)
+			}
+		}
 		r.emit(e)
 	}
 
@@ -886,9 +892,18 @@ func call[T any](r *run, stage Stage, name, promptRole string, role config.Role,
 	return out, nil
 }
 
-// emit sends an event unless there is no channel or the review was cancelled.
+// emit sends an event unless there is no channel or the review was
+// cancelled. Activity never waits: it is dropped when the consumer is
+// behind, so a slow reader cannot stall an agent's stream into a timeout.
 func (r *run) emit(e Event) {
 	if r.events == nil {
+		return
+	}
+	if e.Kind == AgentActivity {
+		select {
+		case r.events <- e:
+		default:
+		}
 		return
 	}
 	select {

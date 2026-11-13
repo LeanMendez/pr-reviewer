@@ -17,7 +17,9 @@ const (
 
 // Event is one progress update of a review. Agent events carry the agent
 // name, its config role and model; StageStarted and StageDone of the
-// validation stage carry the number of candidates.
+// validation stage carry the number of candidates, and a specialist's
+// AgentDone the number of findings it returned. AgentActivity is best
+// effort: it is dropped while the consumer is behind.
 type Event struct {
 	Kind       EventKind
 	Stage      Stage

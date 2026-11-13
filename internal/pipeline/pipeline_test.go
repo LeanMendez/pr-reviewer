@@ -1317,3 +1317,72 @@ func TestResultVersioned(t *testing.T) {
 		t.Errorf("round trip = %+v, %v", back, err)
 	}
 }
+
+func TestAgentDoneCarriesCandidates(t *testing.T) {
+	fake := newFake(map[string]any{
+		prompts.RoleBugs: specialistReply(
+			hallazgo("src/a.go", 3, finding.SeverityMedio, finding.GroupA, "uno"),
+			hallazgo("src/a.go", 4, finding.SeverityBajo, finding.GroupA, "dos"),
+		),
+	})
+	events := make(chan Event, 256)
+	if _, err := Run(context.Background(), newDeps(fake), newRequest(t, ModeLigero), events); err != nil {
+		t.Fatal(err)
+	}
+	close(events)
+	got := map[string]int{}
+	for e := range events {
+		if e.Kind == AgentDone {
+			got[e.Agent] = e.Candidates
+		}
+	}
+	if want := map[string]int{"resumen": 0, "bugs": 2, "reglas": 0, "superior_sintesis": 0}; !reflect.DeepEqual(got, want) {
+		t.Errorf("AgentDone candidates = %v, want %v", got, want)
+	}
+}
+
+// chattyAgents reports a burst of activity from bugs before answering.
+type chattyAgents struct {
+	*fakeAgents
+	emitted chan struct{}
+}
+
+func (c chattyAgents) Run(ctx context.Context, s agent.Spec, on func(agent.Activity)) (json.RawMessage, error) {
+	if s.Role == prompts.RoleBugs {
+		for i := 0; i < 50; i++ {
+			on(agent.Activity{Agent: s.Name, Text: fmt.Sprintf("leyendo %d", i)})
+		}
+		close(c.emitted)
+	}
+	return c.fakeAgents.Run(ctx, s, nil)
+}
+
+func TestActivityNeverBlocksAgents(t *testing.T) {
+	agents := chattyAgents{newFake(nil), make(chan struct{})}
+	d := newDeps(agents.fakeAgents)
+	d.Agents = agents
+	events := make(chan Event) // unbuffered, and nobody reads while bugs talks
+	stalled := make(chan bool, 1)
+	go func() {
+		waited := false
+		for e := range events {
+			if e.Kind == AgentStarted && e.Agent == "bugs" && !waited {
+				waited = true
+				select {
+				case <-agents.emitted:
+					stalled <- false
+				case <-time.After(5 * time.Second):
+					stalled <- true
+				}
+			}
+		}
+	}()
+	_, err := Run(context.Background(), d, newRequest(t, ModeLigero), events)
+	close(events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if <-stalled {
+		t.Error("the bugs agent stalled on its activity while the consumer was not reading")
+	}
+}

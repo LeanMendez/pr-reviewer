@@ -25,8 +25,9 @@ func ParseMode(s string) (Mode, error) {
 	return "", fmt.Errorf("modo desconocido %q: usá ligero, exhaustivo o judgment", s)
 }
 
-// Suggest proposes exhaustivo for PRs over the size threshold or with
-// sensitive changes to migrations, auth or SQL, and ligero otherwise. It
+// Suggest proposes exhaustivo for PRs over the size threshold, with
+// sensitive changes to migrations, auth or SQL, or touching authentication,
+// sessions, tokens, permissions or security code, and ligero otherwise. It
 // never proposes judgment: that one is always the user's call.
 func Suggest(pre prechecks.Result) Mode {
 	if pre.Oversize {
@@ -38,8 +39,20 @@ func Suggest(pre prechecks.Result) Mode {
 			return ModeExhaustivo
 		}
 	}
+	for _, p := range pre.Changed {
+		p = strings.ToLower(p)
+		for _, w := range accessWords {
+			if strings.Contains(p, w) {
+				return ModeExhaustivo
+			}
+		}
+	}
 	return ModeLigero
 }
+
+// accessWords mark a path as access-control code: a folder or file name
+// containing one of them suggests exhaustivo.
+var accessWords = []string{"auth", "login", "session", "token", "permission", "security"}
 
 // EstimateAgents is the rough agent count shown before a review: ligero runs
 // the summary, bugs, reglas and the synthesis; exhaustivo, one agent per

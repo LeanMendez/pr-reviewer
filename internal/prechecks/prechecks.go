@@ -20,6 +20,7 @@ type Result struct {
 	Sensitive  []string
 	Excluded   []string
 	Unreviewed []string
+	Changed    []string // every changed path that is not generated
 	Oversize   bool
 	TotalLines int
 }
@@ -34,6 +35,7 @@ func Run(pr prb.PR, d prb.Diff, cfg config.Config) Result {
 			r.Excluded = append(r.Excluded, f.Path)
 		} else {
 			files++
+			r.Changed = append(r.Changed, f.Path)
 			r.TotalLines += f.LinesAdded + f.LinesRemoved
 			r.Findings = append(r.Findings, scanSecrets(f)...)
 			if PatchGap(f) != "" {
@@ -58,6 +60,7 @@ func Run(pr prb.PR, d prb.Diff, cfg config.Config) Result {
 			continue
 		}
 		files++
+		r.Changed = append(r.Changed, p)
 		r.Unreviewed = append(r.Unreviewed, p)
 	}
 	r.Oversize = oversize(r.TotalLines, files, cfg)
@@ -65,8 +68,8 @@ func Run(pr prb.PR, d prb.Diff, cfg config.Config) Result {
 	return r
 }
 
-// Summarize fills Oversize, TotalLines, Sensitive and Excluded from a
-// diffstat, without the diff.
+// Summarize fills Oversize, TotalLines, Sensitive, Excluded and Changed from
+// a diffstat, without the diff.
 func Summarize(files []prb.FileStat, cfg config.Config) Result {
 	var r Result
 	n := 0
@@ -76,6 +79,7 @@ func Summarize(files []prb.FileStat, cfg config.Config) Result {
 		} else {
 			n++
 			r.TotalLines += f.LinesAdded + f.LinesRemoved
+			r.Changed = append(r.Changed, f.Path)
 		}
 		if IsSensitive(f.Path) {
 			r.Sensitive = append(r.Sensitive, f.Path)
