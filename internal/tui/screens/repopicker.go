@@ -190,7 +190,7 @@ func (m RepoPickerModel) render(width, height int) string {
 }
 
 func (m RepoPickerModel) header(width int) string {
-	left := theme.Strong.Render(" pr-review   ") + theme.Dim.Render(clean(m.workspace))
+	left := " " + theme.Brand("pr-review") + "   " + theme.Dim.Render(clean(m.workspace))
 	if m.loading || m.err != nil {
 		return left
 	}
@@ -241,7 +241,7 @@ func (m RepoPickerModel) body(height int) []string {
 func (m RepoPickerModel) row(r prb.Repo, selected bool) string {
 	prefix, style := "   ", theme.Text
 	if selected {
-		prefix, style = " "+theme.Accent.Render("▌")+" ", theme.Strong
+		prefix, style = " "+theme.Marker()+" ", theme.Strong
 	}
 	s := prefix + style.Render(pad(r.Slug, repoSlugW))
 	if name := clean(r.Name); name != "" && name != clean(r.Slug) {

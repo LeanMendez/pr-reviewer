@@ -3,8 +3,10 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -24,6 +26,7 @@ import (
 	"github.com/LeanMendez/pr-review/internal/tui/listdata"
 	"github.com/LeanMendez/pr-review/internal/tui/screens"
 	"github.com/LeanMendez/pr-review/internal/tui/sys"
+	"github.com/LeanMendez/pr-review/internal/tui/theme"
 	"github.com/LeanMendez/pr-review/internal/tui/tuitest"
 )
 
@@ -339,10 +342,11 @@ func TestAppModelsFromList(t *testing.T) {
 	h := harness(t)
 	d := listed(t, h, &notes{})
 
-	d.send(screens.OpenModelsMsg{})
-	if v := d.view(); !strings.Contains(v, "configuración, modelos") {
-		t.Fatalf("models screen not shown:\n%s", v)
-	}
+	d.key("m")
+	d.until("the settings", is[screens.OpenSettingsMsg])
+	d.key("enter")
+	d.until("the models", is[screens.OpenModelsMsg])
+	d.shows("enter on Modelos", onModels)
 	// Roles: superior, resumen, bugs. Bugs goes from opus to sonnet.
 	d.key("down")
 	d.key("down")
@@ -352,9 +356,7 @@ func TestAppModelsFromList(t *testing.T) {
 	if got := saved.Cfg.AssignmentFor(config.RoleBugs).Model; got != config.ModelSonnet {
 		t.Fatalf("saved bugs model = %s, want sonnet", got)
 	}
-	if v := d.view(); !strings.Contains(v, "CU-1 Pagos") {
-		t.Fatalf("saving should go back to the list:\n%s", v)
-	}
+	d.shows("saving the models goes back to the settings", onSettings)
 	p, _ := config.Path()
 	if cfg, found, err := config.Load(p); err != nil || !found || cfg.AssignmentFor(config.RoleBugs).Model != config.ModelSonnet {
 		t.Errorf("config on disk: found=%v err=%v", found, err)
@@ -374,13 +376,6 @@ func TestAppModelsFromList(t *testing.T) {
 	if bugs == 0 {
 		t.Error("no bugs agent ran")
 	}
-}
-
-func TestAppModelsOnlyQuitsOnBack(t *testing.T) {
-	h := harness(t)
-	d := newDriver(t, NewModelsApp(h.Deps, fakeSys(&notes{})))
-	d.key("esc")
-	d.until("quit", is[tea.QuitMsg])
 }
 
 // TestAppOnboardingThenList walks the first-run setup through the router:
@@ -865,5 +860,341 @@ func TestAppQuitTwoReviews(t *testing.T) {
 	d.until("quit", is[tea.QuitMsg])
 	if got := n.all(); len(got) != 0 {
 		t.Errorf("quitting notified: %q", got)
+	}
+}
+
+// useDefaultThemeAfter restores the default theme once the test ends.
+func useDefaultThemeAfter(t *testing.T) {
+	t.Helper()
+	t.Cleanup(func() {
+		def, _ := theme.ByName(theme.DefaultName)
+		theme.Use(def)
+	})
+}
+
+func TestAppAppliesConfiguredTheme(t *testing.T) {
+	useDefaultThemeAfter(t)
+	h := harness(t)
+	h.Deps.Cfg.Tema = "claude-code"
+	NewApp(h.Deps, fakeSys(&notes{}), "ws/stock")
+	if got := theme.Current().Name; got != "claude-code" {
+		t.Fatalf("theme = %q, want claude-code", got)
+	}
+}
+
+func TestThemeFor(t *testing.T) {
+	cfg := config.Defaults()
+	if th, note := themeFor(cfg); th.Name != theme.DefaultName || note != "" {
+		t.Errorf("empty: %q, %q", th.Name, note)
+	}
+	cfg.Tema = "noir"
+	if th, note := themeFor(cfg); th.Name != "noir" || note != "" {
+		t.Errorf("known: %q, %q", th.Name, note)
+	}
+	cfg.Tema = "vaporwave"
+	if th, note := themeFor(cfg); th.Name != theme.DefaultName || note != "No conozco el tema vaporwave; uso pr-review." {
+		t.Errorf("unknown: %q, %q", th.Name, note)
+	}
+}
+
+func TestAppUnknownThemeNote(t *testing.T) {
+	useDefaultThemeAfter(t)
+	cfgHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", cfgHome)
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	p := filepath.Join(cfgHome, "pr-review", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte("workspace: ws\ntema: vaporwave\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	deps, err := app.DefaultDeps()
+	if err != nil {
+		t.Fatal(err)
+	}
+	deps.Exec = execx.Fake(func(execx.Cmd) (string, string, int) { return "", "", 1 })
+	d := newDriver(t, NewApp(deps, fakeSys(&notes{}), "ws/stock"))
+	d.send(tea.WindowSizeMsg{Width: 120, Height: 40})
+	if got := theme.Current().Name; got != theme.DefaultName {
+		t.Errorf("theme = %q, want the default", got)
+	}
+	const note = "No conozco el tema vaporwave; uso pr-review."
+	d.send(screens.RowsLoadedMsg{Ready: []listdata.Row{row477()}})
+	if v := d.view(); !strings.Contains(v, note) {
+		t.Fatalf("the load erased the note:\n%s", v)
+	}
+
+	// Saving the models keeps the text of the theme.
+	d.key("m")
+	d.until("the settings", is[screens.OpenSettingsMsg])
+	d.key("enter")
+	d.until("the models", is[screens.OpenModelsMsg])
+	d.key("g")
+	d.until("the save", is[screens.ModelsSavedMsg])
+	data, _ := os.ReadFile(p)
+	if !strings.Contains(string(data), "tema: vaporwave") {
+		t.Errorf("tema was not kept:\n%s", data)
+	}
+}
+
+func TestAppViewFillsWholeScreen(t *testing.T) {
+	const w, h = 100, 30
+	for _, name := range []string{"claude-code", "sensei"} {
+		th, ok := theme.ByName(name)
+		if !ok {
+			t.Fatal(name)
+		}
+		check := func(t *testing.T, view, where string) {
+			t.Helper()
+			assertFilled(t, view, name+"/"+where, th.BG, w, h)
+		}
+		t.Run(name, func(t *testing.T) {
+			useDefaultThemeAfter(t)
+			hh := harness(t)
+			hh.Deps.Cfg.Tema = name
+			d := newDriver(t, NewApp(hh.Deps, fakeSys(&notes{}), "ws/stock"))
+			d.send(tea.WindowSizeMsg{Width: w, Height: h})
+			d.send(screens.RowsLoadedMsg{Ready: []listdata.Row{row477(), row88()}})
+			check(t, d.app.View().Content, "list")
+
+			d.app.confirming = true
+			check(t, d.app.View().Content, "quit")
+
+			hh2 := harness(t)
+			hh2.Deps.Cfg.Tema = name
+			hh2.Deps.ConfigFound = false
+			inner := hh2.Deps.Exec
+			ex := func(ctx context.Context, c execx.Cmd) error {
+				switch {
+				case c.Name == "prb":
+					_, _ = c.Stdout.Write([]byte(`{"authenticated":true,"user":"leanm","default_workspace":"otro"}`))
+					return nil
+				case c.Name == "claude" && len(c.Args) > 0 && c.Args[0] == "auth":
+					_, _ = c.Stdout.Write([]byte(`{"loggedIn":true}`))
+					return nil
+				case c.Name == "claude":
+					_, _ = c.Stdout.Write([]byte("2.1.0 (Claude Code)\n"))
+					return nil
+				}
+				return inner(ctx, c)
+			}
+			hh2.Deps.Exec, hh2.Deps.PRB.Exec = ex, ex
+			o := newDriver(t, NewApp(hh2.Deps, fakeSys(&notes{}), "stock"))
+			o.send(tea.WindowSizeMsg{Width: w, Height: h})
+			o.run(o.app.Init())
+			o.until("the tools check", func(tea.Msg) bool { return strings.Contains(o.view(), "Claude Code: 2.1.0") })
+			o.key("enter")
+			if v := o.view(); !strings.Contains(v, "workspace") {
+				t.Fatalf("workspace step not shown:\n%s", v)
+			}
+			check(t, o.app.View().Content, "onboarding")
+		})
+	}
+}
+
+// assertFilled checks that view covers w×h cells, all on the background bg
+// and none with the terminal's default foreground.
+func assertFilled(t *testing.T, view, where, bg string, w, h int) {
+	t.Helper()
+	lines := strings.Split(view, "\n")
+	if len(lines) != h {
+		t.Errorf("%s: %d lines, want %d", where, len(lines), h)
+	}
+	want := strings.ToUpper(bg)
+	for y, l := range lines {
+		width := 0
+		for x, c := range tuitest.Cells(l) {
+			width += c.Width
+			if c.BG != want {
+				t.Fatalf("%s: line %d cell %d %q has background %q, want %s", where, y, x, c.Text, c.BG, want)
+			}
+			if c.FG == "" && strings.TrimSpace(c.Text) != "" {
+				t.Fatalf("%s: line %d cell %d %q has the default foreground", where, y, x, c.Text)
+			}
+		}
+		if width != w {
+			t.Fatalf("%s: line %d is %d cells, want %d", where, y, width, w)
+		}
+	}
+}
+
+// Texts that tell the screens of the settings apart.
+const (
+	onSettings = "los colores de la interfaz"
+	onModels   = "configuración, modelos"
+	onThemes   = "configuración, tema"
+	onList     = "CU-1 Pagos"
+)
+
+func (d *driver) shows(what, want string) {
+	d.t.Helper()
+	if v := d.view(); !strings.Contains(v, want) {
+		d.t.Fatalf("%s: want %q in:\n%s", what, want, v)
+	}
+}
+
+// openThemes goes from the list to the theme picker: m, Tema.
+func (d *driver) openThemes() {
+	d.t.Helper()
+	d.key("m")
+	d.until("the settings", is[screens.OpenSettingsMsg])
+	d.key("down")
+	d.key("enter")
+	d.until("the themes", is[screens.OpenThemesMsg])
+	d.shows("enter on Tema", onThemes)
+}
+
+func TestAppSettingsNavigation(t *testing.T) {
+	h := harness(t)
+	d := listed(t, h, &notes{})
+
+	d.key("m")
+	d.until("the settings", is[screens.OpenSettingsMsg])
+	d.shows("m on the list", onSettings)
+	d.key("enter")
+	d.until("the models", is[screens.OpenModelsMsg])
+	d.shows("enter on Modelos", onModels)
+	d.key("esc")
+	d.until("back", is[screens.BackMsg])
+	d.shows("esc on the models", onSettings)
+
+	d.key("down")
+	d.key("enter")
+	d.until("the themes", is[screens.OpenThemesMsg])
+	d.shows("enter on Tema", onThemes)
+	d.key("esc")
+	d.until("back", is[screens.BackMsg])
+	d.shows("esc on the themes", onSettings)
+
+	d.key("esc")
+	d.until("back", is[screens.BackMsg])
+	d.shows("esc on the settings", onList)
+
+	// pr-review config models still opens the models alone; esc leaves.
+	m := newDriver(t, NewModelsApp(h.Deps, fakeSys(&notes{})))
+	m.shows("config models", onModels)
+	m.key("esc")
+	m.until("quit", is[tea.QuitMsg])
+}
+
+func TestAppThemeChosen(t *testing.T) {
+	useDefaultThemeAfter(t)
+	h := harness(t)
+	h.Deps.Cfg.Concurrency = 7
+	h.Deps.Cfg.Preset = config.PresetPotente
+	h.Deps.Cfg.Models = config.PresetAssignments(config.PresetPotente)
+	d := listed(t, h, &notes{})
+	p, _ := config.Path()
+
+	d.openThemes()
+	d.send(screens.ThemeChosenMsg{Name: "noir"})
+	want := h.Deps.Cfg
+	want.Tema = "noir"
+	if got, found, err := config.Load(p); err != nil || !found || !reflect.DeepEqual(got, want) {
+		t.Errorf("config on disk: found=%v err=%v\n got %+v\nwant %+v", found, err, got, want)
+	}
+	if data, _ := os.ReadFile(p); !strings.Contains(string(data), "tema: noir") {
+		t.Errorf("config.yaml lacks tema: noir:\n%s", data)
+	}
+	if got := theme.Current().Name; got != "noir" {
+		t.Errorf("theme = %q, want noir", got)
+	}
+	d.shows("a saved theme", onSettings)
+
+	// A failed save says so on the picker and changes nothing.
+	d.app.save = func(config.Config) error { return errors.New("disco\nlleno") }
+	d.key("enter") // Tema is still selected
+	d.until("the themes", is[screens.OpenThemesMsg])
+	d.send(screens.ThemeChosenMsg{Name: "sensei"})
+	d.shows("a failed save", onThemes)
+	d.shows("a failed save", "No se pudo guardar: disco lleno")
+	if got := theme.Current().Name; got != "noir" {
+		t.Errorf("theme = %q after a failed save, want noir", got)
+	}
+	if got := d.app.s.d.Cfg.Tema; got != "noir" {
+		t.Errorf("config in memory has tema %q after a failed save, want noir", got)
+	}
+}
+
+// TestAppThemeSwitchWithBackgroundReview: a theme chosen while a review runs
+// in the background repaints its progress too.
+func TestAppThemeSwitchWithBackgroundReview(t *testing.T) {
+	useDefaultThemeAfter(t)
+	h := harness(t)
+	release := make(chan struct{})
+	h.Agents.OnRun = func(ctx context.Context, _ agent.Spec) error {
+		select {
+		case <-release:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	d := listed(t, h, &notes{})
+	// Unbuffered: the review stalls unless the router drains it off screen.
+	d.app.reviews.buffer = 0
+	d.send(screens.StartReviewMsg{Row: row477(), Mode: pipeline.ModeLigero})
+	d.key("s")
+	d.until("the list", is[screens.BackgroundMsg])
+
+	d.openThemes()
+	for range len(theme.All()) - 1 { // sensei is the last
+		d.key("down")
+	}
+	d.key("enter")
+	d.until("the theme", is[screens.ThemeChosenMsg])
+	if got := theme.Current().Name; got != "sensei" {
+		t.Fatalf("theme = %q, want sensei", got)
+	}
+	d.key("esc")
+	d.until("the list", is[screens.BackMsg])
+	d.key("enter")
+	d.until("the progress", is[screens.OpenModeMsg])
+	d.shows("enter on the running review", "modo ligero")
+	assertFilled(t, d.app.View().Content, "progress", "#F5F2EB", 120, 40)
+
+	close(release)
+	d.until("the report", is[screens.OpenResultMsg])
+}
+
+// TestAppThemePickerIgnoresKeysUntilAnswered: enter then esc in the same batch
+// of input must not let the esc leave the settings after the save.
+func TestAppThemePickerIgnoresKeysUntilAnswered(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		t.Run(fmt.Sprintf("save fails=%v", fail), func(t *testing.T) {
+			useDefaultThemeAfter(t)
+			h := harness(t)
+			d := listed(t, h, &notes{})
+			d.openThemes()
+			if fail {
+				d.app.save = func(config.Config) error { return errors.New("disco lleno") }
+			}
+			// Both keys are handled before any message comes back; their
+			// messages are then delivered in order, as the runtime may.
+			var queued []tea.Msg
+			for _, k := range []string{"enter", "esc"} {
+				m, cmd := d.app.Update(tuitest.Key(k))
+				d.app = m.(App)
+				if cmd != nil {
+					queued = append(queued, cmd())
+				}
+			}
+			for _, msg := range queued {
+				if msg != nil {
+					d.send(msg)
+				}
+			}
+			if fail {
+				d.shows("a failed save", onThemes)
+				d.shows("a failed save", "No se pudo guardar: disco lleno")
+				// The picker answers keys again.
+				d.key("esc")
+				d.until("back", is[screens.BackMsg])
+				d.shows("esc after the error", onSettings)
+				return
+			}
+			d.shows("a saved theme", onSettings)
+		})
 	}
 }

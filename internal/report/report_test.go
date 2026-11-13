@@ -15,6 +15,7 @@ import (
 	"github.com/LeanMendez/pr-review/internal/pipeline"
 	"github.com/LeanMendez/pr-review/internal/prb"
 	"github.com/LeanMendez/pr-review/internal/rules"
+	"github.com/LeanMendez/pr-review/internal/tui/theme"
 )
 
 var update = flag.Bool("update", false, "rewrite the golden files")
@@ -120,6 +121,32 @@ func TestMarkdownGolden(t *testing.T) {
 				t.Errorf("review.md differs from %s:\n%s", path, got)
 			}
 		})
+	}
+}
+
+func TestMarkdownUnaffectedByTheme(t *testing.T) {
+	sensei, _ := theme.ByName("sensei")
+	t.Cleanup(func() {
+		def, _ := theme.ByName(theme.DefaultName)
+		theme.Use(def)
+	})
+	theme.Use(sensei)
+	for name, r := range map[string]pipeline.Result{
+		"pedir_cambios_judges": judgmentResult(),
+		"revisar_a_mano":       incompleteResult(),
+		"aprobar":              cleanResult(),
+	} {
+		got := Markdown(r)
+		want, err := os.ReadFile(filepath.Join("testdata", "review_"+name+".golden.md"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != string(want) {
+			t.Errorf("%s: review.md changed under the sensei theme:\n%s", name, got)
+		}
+		if strings.Contains(got, "\x1b") {
+			t.Errorf("%s: review.md has ANSI sequences", name)
+		}
 	}
 }
 

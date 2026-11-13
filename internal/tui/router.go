@@ -12,6 +12,7 @@ import (
 	"github.com/LeanMendez/pr-review/internal/report"
 	"github.com/LeanMendez/pr-review/internal/tui/listdata"
 	"github.com/LeanMendez/pr-review/internal/tui/screens"
+	"github.com/LeanMendez/pr-review/internal/tui/theme"
 )
 
 // Update routes msg: what changes screens or belongs to a review is handled
@@ -70,6 +71,9 @@ func (a App) route(msg tea.Msg) (App, tea.Cmd) {
 		return a.openResult(msg)
 	case screens.OpenReportMsg:
 		return a.openReport(msg)
+	case screens.OpenSettingsMsg:
+		a.settings = screens.NewSettings()
+		return a.show(scrSettings)
 	case screens.OpenModelsMsg:
 		return a.openModels()
 	case screens.ModelsSavedMsg:
@@ -77,7 +81,12 @@ func (a App) route(msg tea.Msg) (App, tea.Cmd) {
 		if a.modelsOnly {
 			return a, tea.Quit
 		}
-		return a.show(scrList)
+		return a.show(scrSettings)
+	case screens.OpenThemesMsg:
+		a.themes = screens.NewThemes(a.s.d.Cfg.Tema)
+		return a.show(scrThemes)
+	case screens.ThemeChosenMsg:
+		return a.chooseTheme(msg.Name)
 	case screens.BackMsg:
 		return a.back()
 	}
@@ -110,6 +119,10 @@ func (a App) forward(msg tea.Msg) (App, tea.Cmd) {
 		a.report, cmd = update(a.report, msg)
 	case scrModels:
 		a.models, cmd = update(a.models, msg)
+	case scrSettings:
+		a.settings, cmd = update(a.settings, msg)
+	case scrThemes:
+		a.themes, cmd = update(a.themes, msg)
 	}
 	return a, cmd
 }
@@ -156,12 +169,34 @@ func (a App) openPicker() (App, tea.Cmd) {
 func (a App) openList(repo string) (App, tea.Cmd) {
 	a.s.repo = repo
 	a.list = a.reviews.mark(screens.NewList(repo, a.loadRows(repo)).WithThreshold(a.s.d.Cfg.Thresholds.MaxLines))
+	if a.themeNote != "" {
+		a.list, a.themeNote = a.list.WithNote(a.themeNote), ""
+	}
 	return a.show(scrList, a.list.Init())
 }
 
 func (a App) openModels() (App, tea.Cmd) {
 	a.models = screens.NewModels(a.s.d.Cfg, a.save)
 	return a.show(scrModels)
+}
+
+// chooseTheme saves the config with the theme name and, once saved, paints
+// the whole interface with it and goes back to the settings. When the save
+// fails the picker says so and nothing changes.
+func (a App) chooseTheme(name string) (App, tea.Cmd) {
+	th, ok := theme.ByName(name)
+	if !ok {
+		return a, nil
+	}
+	cfg := a.s.d.Cfg
+	cfg.Tema = name
+	if err := a.save(cfg); err != nil {
+		a.themes = a.themes.WithSaveError(err)
+		return a, nil
+	}
+	a.s.setConfig(cfg)
+	theme.Use(th)
+	return a.show(scrSettings)
 }
 
 // openMode shows the mode picker for row; a PR under review shows its
@@ -279,8 +314,10 @@ func (a App) back() (App, tea.Cmd) {
 		if a.modelsOnly {
 			return a, tea.Quit
 		}
-		return a.show(scrList)
-	case scrMode, scrProgress, scrReport:
+		return a.show(scrSettings)
+	case scrThemes:
+		return a.show(scrSettings)
+	case scrMode, scrProgress, scrReport, scrSettings:
 		return a.show(scrList)
 	}
 	return a, nil

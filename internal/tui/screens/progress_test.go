@@ -114,8 +114,12 @@ func TestProgressAgents(t *testing.T) {
 	if !strings.Contains(m.render(120, 0), strings.TrimSuffix(theme.Accent.Render("x"), "x\x1b[m")+"falló: se cortó") {
 		t.Error("failure must use the Accent color")
 	}
-	if strings.Contains(m.render(120, 0), "\x1b[38;2;238;127;122m") {
-		t.Error("no red on this screen")
+	for _, l := range strings.Split(m.render(120, 0), "\n") {
+		for _, c := range tuitest.Cells(l) {
+			if red := theme.Current().Crit; c.FG == red || c.BG == red {
+				t.Fatalf("no red on this screen: %+v in %q", c, tuitest.Plain(l))
+			}
+		}
 	}
 	if !strings.Contains(out, "2 candidatos hasta ahora.") {
 		t.Errorf("candidate total missing:\n%s", out)
@@ -386,5 +390,22 @@ func TestProgressPrbHint(t *testing.T) {
 	n, _ = m.Update(ReviewDoneMsg{PR: 477, Err: &prb.Error{Code: "rate_limited", Message: "demasiados pedidos"}})
 	if out := plain(n.(ProgressModel)); !strings.Contains(out, "demasiados pedidos") {
 		t.Errorf("other prb errors keep their text:\n%s", out)
+	}
+}
+
+func TestProgressEmptyLogIsDim(t *testing.T) {
+	m, _ := newProgress(pipeline.ModeLigero, nil)
+	m = feed(m,
+		pipeline.Event{Kind: pipeline.StageStarted, Stage: pipeline.StageSpecialists},
+		pipeline.Event{Kind: pipeline.AgentStarted, Stage: pipeline.StageSpecialists, Agent: "bugs", Role: config.RoleBugs, Model: config.ModelOpus})
+	m, _ = press(m, "l")
+	line := lineWith(m.render(120, 0), "sin actividad registrada")
+	if line == "" {
+		t.Fatal("no empty-log line")
+	}
+	for _, c := range tuitest.Cells(line) {
+		if strings.TrimSpace(c.Text) != "" && !strings.EqualFold(c.FG, theme.Current().Dim) {
+			t.Fatalf("cell %q fg %s, want Dim %s", c.Text, c.FG, theme.Current().Dim)
+		}
 	}
 }

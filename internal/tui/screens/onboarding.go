@@ -12,6 +12,7 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/LeanMendez/pr-review/internal/config"
 	"github.com/LeanMendez/pr-review/internal/execx"
@@ -82,7 +83,18 @@ func NewOnboarding(deps OnboardingDeps) OnboardingModel {
 	in.Placeholder = "mi-workspace"
 	in.CharLimit = 64
 	in.SetWidth(32)
+	in.SetStyles(inputStyles())
 	return OnboardingModel{deps: deps, save: deps.Save, input: in, checking: true}
+}
+
+// inputStyles themes the workspace input: its text, placeholder and prompt
+// carry the theme's colors and background, and the cursor is the accent.
+func inputStyles() textinput.Styles {
+	st := textinput.DefaultDarkStyles()
+	state := textinput.StyleState{Text: theme.Text, Placeholder: theme.Dim, Suggestion: theme.Dim, Prompt: theme.Text}
+	st.Focused, st.Blurred = state, state
+	st.Cursor.Color = lipgloss.Color(theme.Current().Accent)
+	return st
 }
 
 // Init starts the tool checks.
@@ -282,7 +294,7 @@ func (m OnboardingModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m OnboardingModel) View() tea.View { return tea.NewView(m.render(m.width, m.height)) }
 
 func (m OnboardingModel) header(n int) string {
-	return theme.Strong.Render(" pr-review") + theme.Dim.Render(fmt.Sprintf("   configuración inicial, paso %d de 3", n))
+	return " " + theme.Brand("pr-review") + theme.Dim.Render(fmt.Sprintf("   configuración inicial, paso %d de 3", n))
 }
 
 func (m OnboardingModel) render(width, height int) string {

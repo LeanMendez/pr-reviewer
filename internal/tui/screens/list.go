@@ -34,8 +34,8 @@ type OpenReportMsg struct {
 	PR   int
 }
 
-// OpenModelsMsg asks the router to open the models screen.
-type OpenModelsMsg struct{}
+// OpenSettingsMsg asks the router to open the settings menu.
+type OpenSettingsMsg struct{}
 
 // QuitMsg asks the router to leave the program.
 type QuitMsg struct{}
@@ -48,8 +48,6 @@ const (
 
 	minWidthAuthor = 100 // below this the author column goes away
 	minWidthBar    = 80  // below this the size bar goes away
-
-	minWidthModelsHelp = 112 // the key help only lists m when it fits
 )
 
 // ListModel is the PR list screen: a table of PRs ready for review and the
@@ -184,7 +182,7 @@ func (m ListModel) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.loading, m.err = true, nil
 		return m, m.startLoad()
 	case "m":
-		return m, emit(OpenModelsMsg{})
+		return m, emit(OpenSettingsMsg{})
 	case "q":
 		return m, emit(QuitMsg{})
 	}
@@ -312,16 +310,21 @@ func (m ListModel) keys(width int) []components.Key {
 	}
 	ks := []components.Key{
 		{Keys: "↑↓", Desc: "moverse"}, {Keys: "enter", Desc: "elegir modo"}, {Keys: "/", Desc: "filtrar"},
-		{Keys: "t", Desc: all}, {Keys: "r", Desc: "actualizar"},
+		{Keys: "t", Desc: all}, {Keys: "r", Desc: "actualizar"}, {Keys: "m", Desc: "configuración"}, {Keys: "q", Desc: "salir"},
 	}
-	if width >= minWidthModelsHelp {
-		ks = append(ks, components.Key{Keys: "m", Desc: "modelos"})
+	// When the line is too long, drop the least important entries first: m
+	// and q always stay.
+	for _, drop := range []string{"r", "t", "/"} {
+		if width <= 0 || 1+ansi.StringWidth(components.KeyHelp(ks)) <= width {
+			break
+		}
+		ks = slices.DeleteFunc(ks, func(k components.Key) bool { return k.Keys == drop })
 	}
-	return append(ks, components.Key{Keys: "q", Desc: "salir"})
+	return ks
 }
 
 func (m ListModel) header(width int) string {
-	left := theme.Strong.Render(" pr-review   ") + theme.Dim.Render(clean(m.repo))
+	left := " " + theme.Brand("pr-review") + "   " + theme.Dim.Render(clean(m.repo))
 	if m.loading || m.err != nil {
 		return left
 	}
@@ -471,7 +474,7 @@ func (m ListModel) row(e entry, selected bool, c columns, tw int) string {
 	pr := e.Ctx.PullRequest
 	prefix := "   "
 	if selected {
-		prefix = " " + theme.Accent.Render("▌") + " "
+		prefix = " " + theme.Marker() + " "
 	}
 	body, num := theme.Text, theme.Text
 	switch {

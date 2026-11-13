@@ -255,7 +255,7 @@ func (m ProgressModel) View() tea.View { return tea.NewView(m.render(m.width, m.
 func (m ProgressModel) render(width, height int) string {
 	pr := m.row.Ctx.PullRequest
 	lines := []string{
-		theme.Strong.Render(" pr-review   ") + theme.Text.Render(fmt.Sprintf("#%d %s", pr.ID, clean(pr.Title))) +
+		" " + theme.Brand("pr-review") + "   " + theme.Text.Render(fmt.Sprintf("#%d %s", pr.ID, clean(pr.Title))) +
 			theme.Dim.Render("   modo "+string(m.mode)),
 		"",
 	}
@@ -458,7 +458,7 @@ func (m ProgressModel) agentEntry(a *agentState, roleCol, aw int, specialists bo
 	out := []string{line}
 	if m.showLog {
 		if len(a.log) == 0 {
-			out = append(out, theme.Tick.Render(indent+"    (sin actividad registrada)"))
+			out = append(out, theme.Dim.Render(indent+"    (sin actividad registrada)"))
 		}
 		for _, l := range a.log {
 			out = append(out, theme.Dim.Render(indent+"    · "+l))
