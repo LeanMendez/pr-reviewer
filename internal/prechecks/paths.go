@@ -2,6 +2,7 @@ package prechecks
 
 import (
 	"path"
+	"slices"
 	"strings"
 )
 
@@ -15,14 +16,18 @@ var manifests = []string{
 	"requirements.txt", "Cargo.toml", "pom.xml", "build.gradle", "build.gradle.kts",
 }
 
-var generatedDirs = []string{"dist", "build", "vendor", "node_modules"}
+// generatedRoots hold build output or vendored code only at the repo root:
+// the same names deeper in the tree are often hand-written code
+// (internal/build, pkg/dist), which must be reviewed.
+var generatedRoots = []string{"dist", "vendor", "node_modules"}
 
 var binaryExts = []string{
 	".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".pdf", ".zip", ".gz",
 	".tar", ".jar", ".exe", ".dll", ".so", ".woff", ".woff2", ".ttf", ".eot", ".mp4",
 }
 
-// ExcludeGlobs are the globs passed to `prb pr diff --exclude`.
+// ExcludeGlobs are the globs passed to `prb pr diff --exclude`. They must
+// match exactly the paths IsGenerated reports (prechecks tests pin it).
 var ExcludeGlobs = buildExcludeGlobs()
 
 func buildExcludeGlobs() []string {
@@ -30,8 +35,8 @@ func buildExcludeGlobs() []string {
 	for _, l := range lockfiles {
 		g = append(g, "**/"+l, l)
 	}
-	for _, d := range generatedDirs {
-		g = append(g, "**/"+d+"/**", d+"/**")
+	for _, d := range generatedRoots {
+		g = append(g, d+"/**")
 	}
 	g = append(g, "*.min.js", "**/*.min.js", "*.map", "**/*.map")
 	for _, e := range binaryExts {
@@ -40,8 +45,9 @@ func buildExcludeGlobs() []string {
 	return g
 }
 
-// IsGenerated reports whether path is a lockfile, build output, vendored,
-// minified or binary file, which is excluded from the review.
+// IsGenerated reports whether path is a lockfile, minified, source map or
+// binary file anywhere, or lives under a root-level dist/, vendor/ or
+// node_modules/; such files are excluded from the review.
 func IsGenerated(p string) bool {
 	p = normalize(p)
 	base := path.Base(p)
@@ -59,15 +65,8 @@ func IsGenerated(p string) bool {
 			return true
 		}
 	}
-	segs := strings.Split(p, "/")
-	for _, s := range segs[:len(segs)-1] {
-		for _, d := range generatedDirs {
-			if s == d {
-				return true
-			}
-		}
-	}
-	return false
+	root, _, nested := strings.Cut(p, "/")
+	return nested && slices.Contains(generatedRoots, root)
 }
 
 // IsSensitive reports whether path deserves extra attention from the agents.

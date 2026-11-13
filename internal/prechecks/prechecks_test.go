@@ -2,7 +2,9 @@ package prechecks
 
 import (
 	"fmt"
+	"path"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -156,7 +158,7 @@ func TestExcludedAndUnreviewed(t *testing.T) {
 	if !reflect.DeepEqual(r.Unreviewed, []string{"big.go", "other.go"}) {
 		t.Errorf("unreviewed = %v", r.Unreviewed)
 	}
-	for _, p := range []string{"yarn.lock", "go.sum", "a/vendor/b.go", "a/node_modules/x.js", "m.js.map", "logo.png"} {
+	for _, p := range []string{"yarn.lock", "go.sum", "vendor/b.go", "node_modules/x.js", "m.js.map", "logo.png"} {
 		if !IsGenerated(p) {
 			t.Errorf("%s should be generated", p)
 		}
@@ -164,6 +166,54 @@ func TestExcludedAndUnreviewed(t *testing.T) {
 	if IsGenerated("src/a.go") || len(ExcludeGlobs) == 0 {
 		t.Error("src/a.go generated or no globs")
 	}
+}
+
+// TestGeneratedAgreesWithExcludeGlobs pins what is generated and checks that
+// the globs sent to prb and IsGenerated say the same for every path.
+func TestGeneratedAgreesWithExcludeGlobs(t *testing.T) {
+	for p, want := range map[string]bool{
+		// build output and vendored code only at the repo root
+		"dist/app.js": true, "vendor/github.com/x/y.go": true, "node_modules/left-pad/index.js": true,
+		"internal/build/deploy.go": false, "build/main.go": false, "cmd/build.go": false,
+		"pkg/dist/version.go": false, "a/vendor/b.go": false, "web/node_modules/x.js": false,
+		// lockfiles, minified files, source maps and binaries anywhere
+		"package-lock.json": true, "web/yarn.lock": true, "services/api/go.sum": true,
+		"app.min.js": true, "web/js/app.min.js": true, "web/js/app.js.map": true,
+		"logo.png": true, "assets/img/logo.png": true, "docs/manual.pdf": true,
+		// hand-written code
+		"src/a.go": false, "web/js/app.js": false, "go.mod": false, "distribution/x.go": false,
+	} {
+		if got := IsGenerated(p); got != want {
+			t.Errorf("IsGenerated(%q) = %v, want %v", p, got, want)
+		}
+		if got := slices.ContainsFunc(ExcludeGlobs, func(g string) bool { return globMatch(g, p) }); got != want {
+			t.Errorf("ExcludeGlobs match %q = %v, want %v", p, got, want)
+		}
+	}
+}
+
+// globMatch matches a path against a glob where "**" is any number of
+// whole segments and every other segment follows path.Match.
+func globMatch(pattern, name string) bool {
+	var match func(p, n []string) bool
+	match = func(p, n []string) bool {
+		switch {
+		case len(p) == 0:
+			return len(n) == 0
+		case p[0] == "**":
+			for i := 0; i <= len(n); i++ {
+				if match(p[1:], n[i:]) {
+					return true
+				}
+			}
+			return false
+		case len(n) == 0:
+			return false
+		}
+		ok, _ := path.Match(p[0], n[0])
+		return ok && match(p[1:], n[1:])
+	}
+	return match(strings.Split(pattern, "/"), strings.Split(name, "/"))
 }
 
 func TestPartialPatchesAreUnreviewed(t *testing.T) {
