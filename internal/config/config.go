@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -43,7 +44,7 @@ func Defaults() Config {
 		Models:        PresetAssignments(PresetBalanceado),
 		Thresholds:    Thresholds{MaxLines: 400, MaxFiles: 15, MaxMinorDetails: 5},
 		TaskIDPattern: `^(CU-[0-9a-z]+|[A-Z][A-Z0-9]{1,9}-\d+)`,
-		CloneURL:      "git@bitbucket.org:{workspace}/{repo}.git",
+		CloneURL:      "git@ssh.bitbucket.org:{workspace}/{repo}.git",
 		Concurrency:   4,
 		AgentTimeout:  10 * time.Minute,
 	}
@@ -101,6 +102,7 @@ func Load(path string) (cfg Config, found bool, err error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return Defaults(), true, fmt.Errorf("leyendo %s: %w", path, err)
 	}
+	cfg.CloneURL = moveRetiredSSHHost(cfg.CloneURL)
 	if _, err := regexp.Compile(cfg.TaskIDPattern); err != nil {
 		return Defaults(), true, fmt.Errorf("patron_id_tarea inválido en %s: %w", path, err)
 	}
@@ -108,6 +110,25 @@ func Load(path string) (cfg Config, found bool, err error) {
 		return Defaults(), true, err
 	}
 	return cfg, true, nil
+}
+
+// retiredSSHHosts maps clone URL prefixes on Bitbucket's old SSH host to the
+// new one: Bitbucket moved SSH to ssh.bitbucket.org and bitbucket.org now
+// refuses SSH connections, so a URL on the old host can never work.
+var retiredSSHHosts = [][2]string{
+	{"git@bitbucket.org:", "git@ssh.bitbucket.org:"},
+	{"ssh://git@bitbucket.org/", "ssh://git@ssh.bitbucket.org/"},
+}
+
+// moveRetiredSSHHost returns url on the new SSH host when it points at the
+// old one, and url unchanged otherwise.
+func moveRetiredSSHHost(url string) string {
+	for _, h := range retiredSSHHosts {
+		if rest, ok := strings.CutPrefix(url, h[0]); ok {
+			return h[1] + rest
+		}
+	}
+	return url
 }
 
 // checkLimits rejects limits that would silently turn a check off or stall

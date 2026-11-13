@@ -74,17 +74,21 @@ func (c Cache) Prepare(ctx context.Context, workspace, repo string, pr prb.PR) (
 		return Worktrees{}, nil, err
 	}
 	defer unlock()
+	url := strings.NewReplacer("{workspace}", workspace, "{repo}", repo).Replace(c.CloneURL)
 	if _, err := os.Stat(filepath.Join(repoDir, ".git")); err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			return Worktrees{}, nil, err
 		}
-		url := strings.NewReplacer("{workspace}", workspace, "{repo}", repo).Replace(c.CloneURL)
 		if err := os.MkdirAll(filepath.Dir(repoDir), 0o755); err != nil {
 			return Worktrees{}, nil, err
 		}
 		if _, err := c.git(ctx, "", "clone", "--quiet", url, repoDir); err != nil {
 			return Worktrees{}, nil, fmt.Errorf("clonando %s/%s: %w", workspace, repo, err)
 		}
+	} else if _, err := c.git(ctx, repoDir, "remote", "set-url", "origin", url); err != nil {
+		// A clone keeps the origin it was made from: follow the configured
+		// URL, so a moved host or an edited config takes effect.
+		return Worktrees{}, nil, fmt.Errorf("actualizando origin de %s/%s: %w", workspace, repo, err)
 	}
 
 	// Branch names come from the PR: as full refs, none can read as an option.

@@ -13,7 +13,7 @@ func TestDefaults(t *testing.T) {
 	d := Defaults()
 	if d.Preset != PresetBalanceado || d.Thresholds.MaxLines != 400 || d.Thresholds.MaxFiles != 15 ||
 		d.Thresholds.MaxMinorDetails != 5 || d.Concurrency != 4 || d.AgentTimeout != 10*time.Minute ||
-		d.CloneURL != "git@bitbucket.org:{workspace}/{repo}.git" ||
+		d.CloneURL != "git@ssh.bitbucket.org:{workspace}/{repo}.git" ||
 		d.TaskIDPattern != `^(CU-[0-9a-z]+|[A-Z][A-Z0-9]{1,9}-\d+)` {
 		t.Fatalf("unexpected defaults: %+v", d)
 	}
@@ -77,6 +77,36 @@ func TestLoadPartialKeepsDefaults(t *testing.T) {
 	}
 	if got.Workspace != "acme" || got.AgentTimeout != 10*time.Minute || got.Concurrency != 4 {
 		t.Fatalf("%+v", got)
+	}
+}
+
+// Bitbucket moved SSH to ssh.bitbucket.org and the old host refuses SSH, so a
+// saved clone URL on the old host is moved; any other URL is kept as is.
+func TestLoadMovesCloneURLOffRetiredSSHHost(t *testing.T) {
+	tests := []struct {
+		name, saved, want string
+	}{
+		{"scp-like old host", "git@bitbucket.org:{workspace}/{repo}.git", "git@ssh.bitbucket.org:{workspace}/{repo}.git"},
+		{"ssh scheme old host", "ssh://git@bitbucket.org/{workspace}/{repo}.git", "ssh://git@ssh.bitbucket.org/{workspace}/{repo}.git"},
+		{"new host kept", "git@ssh.bitbucket.org:{workspace}/{repo}.git", "git@ssh.bitbucket.org:{workspace}/{repo}.git"},
+		{"https kept", "https://bitbucket.org/{workspace}/{repo}.git", "https://bitbucket.org/{workspace}/{repo}.git"},
+		{"other host kept", "git@example.com:{workspace}/{repo}.git", "git@example.com:{workspace}/{repo}.git"},
+		{"lookalike host kept", "git@bitbucket.org.evil.com:{workspace}/{repo}.git", "git@bitbucket.org.evil.com:{workspace}/{repo}.git"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "c.yaml")
+			if err := os.WriteFile(path, []byte("url_clonado: "+tt.saved+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			got, found, err := Load(path)
+			if err != nil || !found {
+				t.Fatalf("found=%v err=%v", found, err)
+			}
+			if got.CloneURL != tt.want {
+				t.Errorf("CloneURL = %q, want %q", got.CloneURL, tt.want)
+			}
+		})
 	}
 }
 

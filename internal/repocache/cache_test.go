@@ -127,6 +127,30 @@ func TestPrepareReusesClone(t *testing.T) {
 	_ = cleanup2()
 }
 
+// A clone made before the clone URL changed (for example, before Bitbucket
+// moved its SSH host) must fetch from the configured URL, not the old one.
+func TestPrepareRepointsExistingCloneToCloneURL(t *testing.T) {
+	origin, develop, feature := fixture(t)
+	c := Cache{Exec: execx.Real(), Root: t.TempDir(), CloneURL: origin}
+	pr := newPR(develop, feature)
+	_, cleanup, err := c.Prepare(context.Background(), "ws", "repo", pr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = cleanup()
+	clone := filepath.Join(c.Root, "ws", "repo", "clone")
+	git(t, clone, "remote", "set-url", "origin", filepath.Join(t.TempDir(), "retired-host"))
+
+	_, cleanup, err = c.Prepare(context.Background(), "ws", "repo", pr)
+	if err != nil {
+		t.Fatalf("prepare with a stale origin: %v", err)
+	}
+	defer cleanup()
+	if got := git(t, clone, "remote", "get-url", "origin"); got != origin {
+		t.Errorf("origin = %q, want %q", got, origin)
+	}
+}
+
 func TestCleanupRemovesWorktrees(t *testing.T) {
 	origin, develop, feature := fixture(t)
 	c := Cache{Exec: execx.Real(), Root: t.TempDir(), CloneURL: origin}
