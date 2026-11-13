@@ -17,6 +17,7 @@ import (
 	"github.com/LeanMendez/pr-review/internal/execx"
 	"github.com/LeanMendez/pr-review/internal/finding"
 	"github.com/LeanMendez/pr-review/internal/repocache"
+	"github.com/LeanMendez/pr-review/internal/tui"
 )
 
 // harness runs the review command against apptest's fakes.
@@ -24,9 +25,12 @@ type harness struct{ *apptest.Harness }
 
 func newHarness(t *testing.T) *harness { return &harness{apptest.New(t)} }
 
+// noUI fails a command that opens the interface by mistake.
+func noUI(context.Context, app.Deps, tui.Start) error { return errors.New("the interface opened") }
+
 // run executes the review command and returns its exit code.
 func (h *harness) run(ctx context.Context, args ...string) (int, error) {
-	root := newRootCmd("test", func() (app.Deps, error) { return h.Deps, nil })
+	root := newRootCmd("test", func() (app.Deps, error) { return h.Deps, nil }, noUI)
 	root.SetOut(&h.Out)
 	root.SetErr(&h.Err)
 	root.SetArgs(args)
