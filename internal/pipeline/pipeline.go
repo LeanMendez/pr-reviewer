@@ -18,14 +18,14 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/LeanMendez/pr-review/internal/agent"
-	"github.com/LeanMendez/pr-review/internal/config"
-	"github.com/LeanMendez/pr-review/internal/finding"
-	"github.com/LeanMendez/pr-review/internal/prb"
-	"github.com/LeanMendez/pr-review/internal/prechecks"
-	"github.com/LeanMendez/pr-review/internal/prompts"
-	"github.com/LeanMendez/pr-review/internal/repocache"
-	"github.com/LeanMendez/pr-review/internal/rules"
+	"github.com/LeanMendez/pr-reviewer/internal/agent"
+	"github.com/LeanMendez/pr-reviewer/internal/config"
+	"github.com/LeanMendez/pr-reviewer/internal/finding"
+	"github.com/LeanMendez/pr-reviewer/internal/prb"
+	"github.com/LeanMendez/pr-reviewer/internal/prechecks"
+	"github.com/LeanMendez/pr-reviewer/internal/prompts"
+	"github.com/LeanMendez/pr-reviewer/internal/repocache"
+	"github.com/LeanMendez/pr-reviewer/internal/rules"
 )
 
 // AgentRunner runs one agent and returns its structured output. The caller

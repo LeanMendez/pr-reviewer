@@ -5,7 +5,7 @@ import (
 	"os"
 	"os/signal"
 
-	"github.com/LeanMendez/pr-review/internal/cli"
+	"github.com/LeanMendez/pr-reviewer/internal/cli"
 )
 
 func main() {

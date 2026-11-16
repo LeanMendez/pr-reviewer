@@ -4,9 +4,9 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/LeanMendez/pr-review/internal/config"
-	"github.com/LeanMendez/pr-review/internal/prb"
-	"github.com/LeanMendez/pr-review/internal/prechecks"
+	"github.com/LeanMendez/pr-reviewer/internal/config"
+	"github.com/LeanMendez/pr-reviewer/internal/prb"
+	"github.com/LeanMendez/pr-reviewer/internal/prechecks"
 )
 
 func TestParseMode(t *testing.T) {

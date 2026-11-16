@@ -3,7 +3,7 @@ package components
 import (
 	"strings"
 
-	"github.com/LeanMendez/pr-review/internal/tui/theme"
+	"github.com/LeanMendez/pr-reviewer/internal/tui/theme"
 )
 
 // Key is one entry of the key-help footer.

@@ -14,11 +14,11 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/LeanMendez/pr-review/internal/config"
-	"github.com/LeanMendez/pr-review/internal/execx"
-	"github.com/LeanMendez/pr-review/internal/prb"
-	"github.com/LeanMendez/pr-review/internal/tui/components"
-	"github.com/LeanMendez/pr-review/internal/tui/theme"
+	"github.com/LeanMendez/pr-reviewer/internal/config"
+	"github.com/LeanMendez/pr-reviewer/internal/execx"
+	"github.com/LeanMendez/pr-reviewer/internal/prb"
+	"github.com/LeanMendez/pr-reviewer/internal/tui/components"
+	"github.com/LeanMendez/pr-reviewer/internal/tui/theme"
 )
 
 // toolCheckTimeout bounds each external check so a hung tool cannot freeze

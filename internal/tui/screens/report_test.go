@@ -14,15 +14,15 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/LeanMendez/pr-review/internal/execx"
-	"github.com/LeanMendez/pr-review/internal/finding"
-	"github.com/LeanMendez/pr-review/internal/pipeline"
-	"github.com/LeanMendez/pr-review/internal/prb"
-	"github.com/LeanMendez/pr-review/internal/report"
-	"github.com/LeanMendez/pr-review/internal/rules"
-	"github.com/LeanMendez/pr-review/internal/tui/sys"
-	"github.com/LeanMendez/pr-review/internal/tui/theme"
-	"github.com/LeanMendez/pr-review/internal/tui/tuitest"
+	"github.com/LeanMendez/pr-reviewer/internal/execx"
+	"github.com/LeanMendez/pr-reviewer/internal/finding"
+	"github.com/LeanMendez/pr-reviewer/internal/pipeline"
+	"github.com/LeanMendez/pr-reviewer/internal/prb"
+	"github.com/LeanMendez/pr-reviewer/internal/report"
+	"github.com/LeanMendez/pr-reviewer/internal/rules"
+	"github.com/LeanMendez/pr-reviewer/internal/tui/sys"
+	"github.com/LeanMendez/pr-reviewer/internal/tui/theme"
+	"github.com/LeanMendez/pr-reviewer/internal/tui/tuitest"
 )
 
 const prURL = "https://bitbucket.org/acme/api-pagos/pull-requests/477"

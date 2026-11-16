@@ -12,11 +12,11 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/LeanMendez/pr-review/internal/eligibility"
-	"github.com/LeanMendez/pr-review/internal/prb"
-	"github.com/LeanMendez/pr-review/internal/tui/components"
-	"github.com/LeanMendez/pr-review/internal/tui/listdata"
-	"github.com/LeanMendez/pr-review/internal/tui/theme"
+	"github.com/LeanMendez/pr-reviewer/internal/eligibility"
+	"github.com/LeanMendez/pr-reviewer/internal/prb"
+	"github.com/LeanMendez/pr-reviewer/internal/tui/components"
+	"github.com/LeanMendez/pr-reviewer/internal/tui/listdata"
+	"github.com/LeanMendez/pr-reviewer/internal/tui/theme"
 )
 
 // RowsLoadedMsg carries the result of a load of the list: a first page that

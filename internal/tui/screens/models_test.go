@@ -7,8 +7,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/LeanMendez/pr-review/internal/config"
-	"github.com/LeanMendez/pr-review/internal/tui/tuitest"
+	"github.com/LeanMendez/pr-reviewer/internal/config"
+	"github.com/LeanMendez/pr-reviewer/internal/tui/tuitest"
 )
 
 func pressKeys(m tea.Model, keys ...string) (tea.Model, tea.Msg) {

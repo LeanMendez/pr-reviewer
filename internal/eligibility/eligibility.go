@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/LeanMendez/pr-review/internal/prb"
+	"github.com/LeanMendez/pr-reviewer/internal/prb"
 )
 
 // Reason says why a PR is hidden from the list.

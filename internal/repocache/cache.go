@@ -11,8 +11,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/LeanMendez/pr-review/internal/execx"
-	"github.com/LeanMendez/pr-review/internal/prb"
+	"github.com/LeanMendez/pr-reviewer/internal/execx"
+	"github.com/LeanMendez/pr-reviewer/internal/prb"
 )
 
 // ErrForkUnsupported is returned for PRs whose source lives in another repo.

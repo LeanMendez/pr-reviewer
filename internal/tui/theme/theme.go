@@ -13,7 +13,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/LeanMendez/pr-review/internal/finding"
+	"github.com/LeanMendez/pr-reviewer/internal/finding"
 )
 
 // Style tokens of the active theme. Every one carries the theme background.

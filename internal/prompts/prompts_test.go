@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/LeanMendez/pr-review/internal/finding"
-	"github.com/LeanMendez/pr-review/internal/prb"
-	"github.com/LeanMendez/pr-review/internal/prechecks"
-	"github.com/LeanMendez/pr-review/internal/rules"
+	"github.com/LeanMendez/pr-reviewer/internal/finding"
+	"github.com/LeanMendez/pr-reviewer/internal/prb"
+	"github.com/LeanMendez/pr-reviewer/internal/prechecks"
+	"github.com/LeanMendez/pr-reviewer/internal/rules"
 )
 
 var allRoles = []string{

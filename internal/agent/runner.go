@@ -11,8 +11,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/LeanMendez/pr-review/internal/config"
-	"github.com/LeanMendez/pr-review/internal/execx"
+	"github.com/LeanMendez/pr-reviewer/internal/config"
+	"github.com/LeanMendez/pr-reviewer/internal/execx"
 )
 
 // ErrNoOutput means the agent finished without a structured result.

@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LeanMendez/pr-review/internal/execx"
-	"github.com/LeanMendez/pr-review/internal/finding"
-	"github.com/LeanMendez/pr-review/internal/pipeline"
-	"github.com/LeanMendez/pr-review/internal/prb"
-	"github.com/LeanMendez/pr-review/internal/rules"
-	"github.com/LeanMendez/pr-review/internal/tui/theme"
+	"github.com/LeanMendez/pr-reviewer/internal/execx"
+	"github.com/LeanMendez/pr-reviewer/internal/finding"
+	"github.com/LeanMendez/pr-reviewer/internal/pipeline"
+	"github.com/LeanMendez/pr-reviewer/internal/prb"
+	"github.com/LeanMendez/pr-reviewer/internal/rules"
+	"github.com/LeanMendez/pr-reviewer/internal/tui/theme"
 )
 
 var update = flag.Bool("update", false, "rewrite the golden files")

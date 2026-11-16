@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LeanMendez/pr-review/internal/config"
-	"github.com/LeanMendez/pr-review/internal/execx"
-	"github.com/LeanMendez/pr-review/internal/prompts"
+	"github.com/LeanMendez/pr-reviewer/internal/config"
+	"github.com/LeanMendez/pr-reviewer/internal/execx"
+	"github.com/LeanMendez/pr-reviewer/internal/prompts"
 )
 
 func smokeRunner() Runner {

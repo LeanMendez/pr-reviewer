@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LeanMendez/pr-review/internal/config"
-	"github.com/LeanMendez/pr-review/internal/eligibility"
-	"github.com/LeanMendez/pr-review/internal/execx"
-	"github.com/LeanMendez/pr-review/internal/pipeline"
-	"github.com/LeanMendez/pr-review/internal/prb"
+	"github.com/LeanMendez/pr-reviewer/internal/config"
+	"github.com/LeanMendez/pr-reviewer/internal/eligibility"
+	"github.com/LeanMendez/pr-reviewer/internal/execx"
+	"github.com/LeanMendez/pr-reviewer/internal/pipeline"
+	"github.com/LeanMendez/pr-reviewer/internal/prb"
 )
 
 var me = prb.Identity{User: "Yo", AccountID: "acc-me"}

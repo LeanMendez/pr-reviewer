@@ -10,12 +10,12 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/LeanMendez/pr-review/internal/config"
-	"github.com/LeanMendez/pr-review/internal/eligibility"
-	"github.com/LeanMendez/pr-review/internal/pipeline"
-	"github.com/LeanMendez/pr-review/internal/prb"
-	"github.com/LeanMendez/pr-review/internal/prechecks"
-	"github.com/LeanMendez/pr-review/internal/report"
+	"github.com/LeanMendez/pr-reviewer/internal/config"
+	"github.com/LeanMendez/pr-reviewer/internal/eligibility"
+	"github.com/LeanMendez/pr-reviewer/internal/pipeline"
+	"github.com/LeanMendez/pr-reviewer/internal/prb"
+	"github.com/LeanMendez/pr-reviewer/internal/prechecks"
+	"github.com/LeanMendez/pr-reviewer/internal/report"
 )
 
 const defaultParallel = 6

@@ -4,10 +4,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/LeanMendez/pr-review/internal/config"
-	"github.com/LeanMendez/pr-review/internal/pipeline"
-	"github.com/LeanMendez/pr-review/internal/tui/theme"
-	"github.com/LeanMendez/pr-review/internal/tui/tuitest"
+	"github.com/LeanMendez/pr-reviewer/internal/config"
+	"github.com/LeanMendez/pr-reviewer/internal/pipeline"
+	"github.com/LeanMendez/pr-reviewer/internal/tui/theme"
+	"github.com/LeanMendez/pr-reviewer/internal/tui/tuitest"
 )
 
 // TestBrandAndMarkerFollowTheme renders every screen and checks that the

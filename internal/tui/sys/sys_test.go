@@ -8,7 +8,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/LeanMendez/pr-review/internal/execx"
+	"github.com/LeanMendez/pr-reviewer/internal/execx"
 )
 
 type call struct {

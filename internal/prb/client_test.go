@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/LeanMendez/pr-review/internal/execx"
+	"github.com/LeanMendez/pr-reviewer/internal/execx"
 )
 
 func fixture(t *testing.T, name string) string {

@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/LeanMendez/pr-review/internal/execx"
+	"github.com/LeanMendez/pr-reviewer/internal/execx"
 )
 
 // Client runs prb through an injectable Exec.

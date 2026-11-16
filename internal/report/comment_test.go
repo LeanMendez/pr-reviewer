@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/LeanMendez/pr-review/internal/finding"
-	"github.com/LeanMendez/pr-review/internal/pipeline"
+	"github.com/LeanMendez/pr-reviewer/internal/finding"
+	"github.com/LeanMendez/pr-reviewer/internal/pipeline"
 )
 
 func TestVerdictTextIsPlain(t *testing.T) {

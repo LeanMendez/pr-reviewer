@@ -11,9 +11,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/LeanMendez/pr-review/internal/app"
-	"github.com/LeanMendez/pr-review/internal/execx"
-	"github.com/LeanMendez/pr-review/internal/tui"
+	"github.com/LeanMendez/pr-reviewer/internal/app"
+	"github.com/LeanMendez/pr-reviewer/internal/execx"
+	"github.com/LeanMendez/pr-reviewer/internal/tui"
 )
 
 // uiFunc opens the terminal interface; tui.Run, replaced in tests.

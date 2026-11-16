@@ -12,8 +12,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/LeanMendez/pr-review/internal/execx"
-	"github.com/LeanMendez/pr-review/internal/prb"
+	"github.com/LeanMendez/pr-reviewer/internal/execx"
+	"github.com/LeanMendez/pr-reviewer/internal/prb"
 )
 
 func git(t *testing.T, dir string, args ...string) string {

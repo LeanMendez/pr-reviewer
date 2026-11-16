@@ -1,6 +1,6 @@
 package pipeline
 
-import "github.com/LeanMendez/pr-review/internal/config"
+import "github.com/LeanMendez/pr-reviewer/internal/config"
 
 // EventKind is what happened in a review.
 type EventKind int

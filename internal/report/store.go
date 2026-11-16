@@ -15,9 +15,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/LeanMendez/pr-review/internal/execx"
-	"github.com/LeanMendez/pr-review/internal/pipeline"
-	"github.com/LeanMendez/pr-review/internal/prb"
+	"github.com/LeanMendez/pr-reviewer/internal/execx"
+	"github.com/LeanMendez/pr-reviewer/internal/pipeline"
+	"github.com/LeanMendez/pr-reviewer/internal/prb"
 )
 
 // Dir is the folder of one review: <root>/<repo>/pr-<N>-<YYYYMMDD-HHMM>.

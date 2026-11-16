@@ -6,9 +6,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/LeanMendez/pr-review/internal/config"
-	"github.com/LeanMendez/pr-review/internal/tui/components"
-	"github.com/LeanMendez/pr-review/internal/tui/theme"
+	"github.com/LeanMendez/pr-reviewer/internal/config"
+	"github.com/LeanMendez/pr-reviewer/internal/tui/components"
+	"github.com/LeanMendez/pr-reviewer/internal/tui/theme"
 )
 
 // PresetChosenMsg reports a ready-made preset picked in the preset picker.

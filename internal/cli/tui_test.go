@@ -7,10 +7,10 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/LeanMendez/pr-review/internal/app"
-	"github.com/LeanMendez/pr-review/internal/app/apptest"
-	"github.com/LeanMendez/pr-review/internal/execx"
-	"github.com/LeanMendez/pr-review/internal/tui"
+	"github.com/LeanMendez/pr-reviewer/internal/app"
+	"github.com/LeanMendez/pr-reviewer/internal/app/apptest"
+	"github.com/LeanMendez/pr-reviewer/internal/execx"
+	"github.com/LeanMendez/pr-reviewer/internal/tui"
 )
 
 // gitOrigin answers `git remote get-url origin` with origin (no remote when

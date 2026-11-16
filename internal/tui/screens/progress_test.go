@@ -10,12 +10,12 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/LeanMendez/pr-review/internal/config"
-	"github.com/LeanMendez/pr-review/internal/pipeline"
-	"github.com/LeanMendez/pr-review/internal/prb"
-	"github.com/LeanMendez/pr-review/internal/tui/listdata"
-	"github.com/LeanMendez/pr-review/internal/tui/theme"
-	"github.com/LeanMendez/pr-review/internal/tui/tuitest"
+	"github.com/LeanMendez/pr-reviewer/internal/config"
+	"github.com/LeanMendez/pr-reviewer/internal/pipeline"
+	"github.com/LeanMendez/pr-reviewer/internal/prb"
+	"github.com/LeanMendez/pr-reviewer/internal/tui/listdata"
+	"github.com/LeanMendez/pr-reviewer/internal/tui/theme"
+	"github.com/LeanMendez/pr-reviewer/internal/tui/tuitest"
 )
 
 type fakeClock struct{ t time.Time }

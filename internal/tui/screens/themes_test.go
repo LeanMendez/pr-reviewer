@@ -7,8 +7,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/LeanMendez/pr-review/internal/tui/theme"
-	"github.com/LeanMendez/pr-review/internal/tui/tuitest"
+	"github.com/LeanMendez/pr-reviewer/internal/tui/theme"
+	"github.com/LeanMendez/pr-reviewer/internal/tui/tuitest"
 )
 
 func restoreTheme(t *testing.T) {

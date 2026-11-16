@@ -3,7 +3,7 @@ package eligibility
 import (
 	"testing"
 
-	"github.com/LeanMendez/pr-review/internal/prb"
+	"github.com/LeanMendez/pr-reviewer/internal/prb"
 )
 
 func pr(mod func(*prb.PRContext)) prb.PRContext {

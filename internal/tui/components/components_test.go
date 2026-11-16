@@ -5,8 +5,8 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/LeanMendez/pr-review/internal/tui/theme"
-	"github.com/LeanMendez/pr-review/internal/tui/tuitest"
+	"github.com/LeanMendez/pr-reviewer/internal/tui/theme"
+	"github.com/LeanMendez/pr-reviewer/internal/tui/tuitest"
 )
 
 func TestSizeBar(t *testing.T) {

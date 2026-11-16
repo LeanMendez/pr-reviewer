@@ -1,4 +1,4 @@
-module github.com/LeanMendez/pr-review
+module github.com/LeanMendez/pr-reviewer
 
 go 1.27
 

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/LeanMendez/pr-review/internal/execx"
+	"github.com/LeanMendez/pr-reviewer/internal/execx"
 )
 
 // ErrNoClipboard means none of wl-copy, xclip or xsel is installed.

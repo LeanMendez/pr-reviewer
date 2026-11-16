@@ -9,10 +9,10 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/LeanMendez/pr-review/internal/app"
-	"github.com/LeanMendez/pr-review/internal/pipeline"
-	"github.com/LeanMendez/pr-review/internal/tui/listdata"
-	"github.com/LeanMendez/pr-review/internal/tui/screens"
+	"github.com/LeanMendez/pr-reviewer/internal/app"
+	"github.com/LeanMendez/pr-reviewer/internal/pipeline"
+	"github.com/LeanMendez/pr-reviewer/internal/tui/listdata"
+	"github.com/LeanMendez/pr-reviewer/internal/tui/screens"
 )
 
 // eventBuffer smooths the bursts of a review: stage and agent events wait

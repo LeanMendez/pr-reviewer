@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/LeanMendez/pr-review/internal/app"
+	"github.com/LeanMendez/pr-reviewer/internal/app"
 )
 
 func TestDefaultDepsReportsConfigFound(t *testing.T) {

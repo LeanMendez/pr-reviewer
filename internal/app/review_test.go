@@ -7,11 +7,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/LeanMendez/pr-review/internal/app"
-	"github.com/LeanMendez/pr-review/internal/app/apptest"
-	"github.com/LeanMendez/pr-review/internal/execx"
-	"github.com/LeanMendez/pr-review/internal/finding"
-	"github.com/LeanMendez/pr-review/internal/pipeline"
+	"github.com/LeanMendez/pr-reviewer/internal/app"
+	"github.com/LeanMendez/pr-reviewer/internal/app/apptest"
+	"github.com/LeanMendez/pr-reviewer/internal/execx"
+	"github.com/LeanMendez/pr-reviewer/internal/finding"
+	"github.com/LeanMendez/pr-reviewer/internal/pipeline"
 )
 
 func TestReviewDirect(t *testing.T) {

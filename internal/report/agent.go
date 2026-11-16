@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/LeanMendez/pr-review/internal/finding"
-	"github.com/LeanMendez/pr-review/internal/pipeline"
-	"github.com/LeanMendez/pr-review/internal/prb"
+	"github.com/LeanMendez/pr-reviewer/internal/finding"
+	"github.com/LeanMendez/pr-reviewer/internal/pipeline"
+	"github.com/LeanMendez/pr-reviewer/internal/prb"
 )
 
 // maxFragmentLines bounds the diff fragment of AgentText, so one huge hunk

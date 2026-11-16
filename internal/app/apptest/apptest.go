@@ -13,13 +13,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LeanMendez/pr-review/internal/agent"
-	"github.com/LeanMendez/pr-review/internal/app"
-	"github.com/LeanMendez/pr-review/internal/config"
-	"github.com/LeanMendez/pr-review/internal/execx"
-	"github.com/LeanMendez/pr-review/internal/prb"
-	"github.com/LeanMendez/pr-review/internal/prompts"
-	"github.com/LeanMendez/pr-review/internal/repocache"
+	"github.com/LeanMendez/pr-reviewer/internal/agent"
+	"github.com/LeanMendez/pr-reviewer/internal/app"
+	"github.com/LeanMendez/pr-reviewer/internal/config"
+	"github.com/LeanMendez/pr-reviewer/internal/execx"
+	"github.com/LeanMendez/pr-reviewer/internal/prb"
+	"github.com/LeanMendez/pr-reviewer/internal/prompts"
+	"github.com/LeanMendez/pr-reviewer/internal/repocache"
 )
 
 // Agents answers by role with an empty, clean review.

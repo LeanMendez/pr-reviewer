@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/LeanMendez/pr-review/internal/finding"
-	"github.com/LeanMendez/pr-review/internal/prb"
+	"github.com/LeanMendez/pr-reviewer/internal/finding"
+	"github.com/LeanMendez/pr-reviewer/internal/prb"
 )
 
 type secretPattern struct {

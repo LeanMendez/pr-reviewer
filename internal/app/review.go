@@ -12,11 +12,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/LeanMendez/pr-review/internal/agent"
-	"github.com/LeanMendez/pr-review/internal/pipeline"
-	"github.com/LeanMendez/pr-review/internal/prechecks"
-	"github.com/LeanMendez/pr-review/internal/prompts"
-	"github.com/LeanMendez/pr-review/internal/report"
+	"github.com/LeanMendez/pr-reviewer/internal/agent"
+	"github.com/LeanMendez/pr-reviewer/internal/pipeline"
+	"github.com/LeanMendez/pr-reviewer/internal/prechecks"
+	"github.com/LeanMendez/pr-reviewer/internal/prompts"
+	"github.com/LeanMendez/pr-reviewer/internal/report"
 )
 
 // Workspace is the configured workspace, or BITBUCKET_WORKSPACE when there

@@ -11,13 +11,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LeanMendez/pr-review/internal/agent"
-	"github.com/LeanMendez/pr-review/internal/app"
-	"github.com/LeanMendez/pr-review/internal/app/apptest"
-	"github.com/LeanMendez/pr-review/internal/execx"
-	"github.com/LeanMendez/pr-review/internal/finding"
-	"github.com/LeanMendez/pr-review/internal/repocache"
-	"github.com/LeanMendez/pr-review/internal/tui"
+	"github.com/LeanMendez/pr-reviewer/internal/agent"
+	"github.com/LeanMendez/pr-reviewer/internal/app"
+	"github.com/LeanMendez/pr-reviewer/internal/app/apptest"
+	"github.com/LeanMendez/pr-reviewer/internal/execx"
+	"github.com/LeanMendez/pr-reviewer/internal/finding"
+	"github.com/LeanMendez/pr-reviewer/internal/repocache"
+	"github.com/LeanMendez/pr-reviewer/internal/tui"
 )
 
 // harness runs the review command against apptest's fakes.

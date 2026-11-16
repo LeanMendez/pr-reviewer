@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/LeanMendez/pr-review/internal/finding"
-	"github.com/LeanMendez/pr-review/internal/pipeline"
+	"github.com/LeanMendez/pr-reviewer/internal/finding"
+	"github.com/LeanMendez/pr-reviewer/internal/pipeline"
 )
 
 // maxReasonRunes caps a failed agent's reason in the footer.

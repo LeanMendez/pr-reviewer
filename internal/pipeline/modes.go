@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/LeanMendez/pr-review/internal/prechecks"
+	"github.com/LeanMendez/pr-reviewer/internal/prechecks"
 )
 
 // Mode selects which stages run (spec 6.5).

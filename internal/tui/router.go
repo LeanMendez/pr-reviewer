@@ -6,13 +6,13 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/LeanMendez/pr-review/internal/app"
-	"github.com/LeanMendez/pr-review/internal/config"
-	"github.com/LeanMendez/pr-review/internal/pipeline"
-	"github.com/LeanMendez/pr-review/internal/report"
-	"github.com/LeanMendez/pr-review/internal/tui/listdata"
-	"github.com/LeanMendez/pr-review/internal/tui/screens"
-	"github.com/LeanMendez/pr-review/internal/tui/theme"
+	"github.com/LeanMendez/pr-reviewer/internal/app"
+	"github.com/LeanMendez/pr-reviewer/internal/config"
+	"github.com/LeanMendez/pr-reviewer/internal/pipeline"
+	"github.com/LeanMendez/pr-reviewer/internal/report"
+	"github.com/LeanMendez/pr-reviewer/internal/tui/listdata"
+	"github.com/LeanMendez/pr-reviewer/internal/tui/screens"
+	"github.com/LeanMendez/pr-reviewer/internal/tui/theme"
 )
 
 // Update routes msg: what changes screens or belongs to a review is handled

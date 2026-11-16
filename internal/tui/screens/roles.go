@@ -1,8 +1,8 @@
 package screens
 
 import (
-	"github.com/LeanMendez/pr-review/internal/config"
-	"github.com/LeanMendez/pr-review/internal/prompts"
+	"github.com/LeanMendez/pr-reviewer/internal/config"
+	"github.com/LeanMendez/pr-reviewer/internal/prompts"
 )
 
 // roleLabel returns the display name and one-line description of a role, as
